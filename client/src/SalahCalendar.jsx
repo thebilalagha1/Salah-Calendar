@@ -260,8 +260,14 @@ export default function SalahCalendar({ user, onLogout }) {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
-        .sc-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; background: ${darkMode ? "#18181B" : "#FFFFFF"}; }
+        .sc-app {
+          --week-timecol-w: 56px;
+          --week-daycol-w: 110px;
+        }
+        @media (max-width: 860px) {
+          .sc-app { --week-timecol-w: 44px; --week-daycol-w: 76px; }
+        }
         .sc-scroll::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
 
         /* app-wide smoothing: light/dark toggling and any colour-only style
@@ -362,7 +368,7 @@ export default function SalahCalendar({ user, onLogout }) {
           .sc-legend { justify-content: flex-start; max-width: 100% !important; gap: 10px !important; }
           .sc-modal { width: auto !important; max-width: calc(100vw - 32px); }
           .sc-drawer { width: 100vw !important; max-width: 100vw; }
-          .sc-week-scroll { overflow-x: auto; }
+          .sc-week-outer { -webkit-overflow-scrolling: touch; }
           .sc-ring-wrap { flex-direction: column !important; gap: 14px !important; padding: 14px !important; }
           .sc-ring-canvas { width: min(420px, 90vw); height: min(420px, 90vw); }
           .sc-month-day-num { font-size: 11px !important; width: 18px !important; height: 18px !important; }
@@ -949,9 +955,9 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
         </div>
       )}
 
+      <div className="sc-week-outer" style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch" }}>
       <div
-        className="sc-week-scroll"
-        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 56 + dates.length * 110 }}
+        style={{ display: "flex", flexDirection: "column", height: "100%", minWidth: `calc(var(--week-timecol-w) + ${dates.length} * var(--week-daycol-w))` }}
       >
         <div style={S.weekGridHead}>
           <div style={S.weekTimeCol} />
@@ -1167,17 +1173,33 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
                 .filter((b) => b.end > b.start),
             ].sort((a, b) => a.start - b.start);
 
+            // Two adjacent windows can sit close enough in time (e.g. Fajr
+            // ending right as the post-Fajr Discouraged window begins) that
+            // a vertically-centered label would spill into its neighbor's
+            // space. Instead of centering each label independently, lay
+            // them out in one pass, top to bottom, and push any label down
+            // just enough to clear the one above it, so labels never overlap.
+            const LABEL_H = 24; // approx. rendered height of the two-line label
+            const LABEL_GAP = 3; // minimum breathing room between labels
+            let prevLabelBottom = -Infinity;
+            const placed = brackets.map((b) => {
+              const top = (b.start - DAY_START) * PX_PER_MIN;
+              const height = Math.max(3, (b.end - b.start) * PX_PER_MIN);
+              let labelTop = top + height / 2 - LABEL_H / 2;
+              if (labelTop < prevLabelBottom + LABEL_GAP) labelTop = prevLabelBottom + LABEL_GAP;
+              prevLabelBottom = labelTop + LABEL_H;
+              return { ...b, top, height, labelTop };
+            });
+
             return (
               <div style={{ width: 122, flexShrink: 0, position: "relative" }}>
-                {brackets.map((b) => {
-                  const top = (b.start - DAY_START) * PX_PER_MIN;
-                  const height = Math.max(3, (b.end - b.start) * PX_PER_MIN);
+                {placed.map((b) => {
                   const isProhibited = b.type === "prohibited";
                   return (
                     <div
                       key={b.id}
                       title={`${isProhibited ? "Discouraged" : b.label}${b.continued ? " (continued past midnight)" : ""} — ${fmtT(b.start)}–${fmtT(b.realEnd)}`}
-                      style={{ position: "absolute", left: 4, top, height, width: 112 }}
+                      style={{ position: "absolute", left: 4, top: b.top, height: b.height, width: 112 }}
                     >
                       {!isProhibited && (
                         <div className="sc-bracket" style={{
@@ -1190,7 +1212,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
                         }} />
                       )}
                       <div style={{
-                        position: "absolute", left: isProhibited ? 0 : 13, top: "50%", transform: "translateY(-50%)",
+                        position: "absolute", left: 13, top: b.labelTop - b.top,
                         fontSize: 9.5, lineHeight: 1.3, color: b.color, whiteSpace: "nowrap",
                       }}>
                         <div style={{ fontWeight: 600 }}>{isProhibited ? "Discouraged" : b.label}{b.continued ? " ↩" : ""}</div>
@@ -1204,6 +1226,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
           })()}
         </div>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -1522,18 +1545,18 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
         <label style={S.fieldLabel}>Title</label>
         <input style={S.input} autoFocus={typeof window !== "undefined" && window.innerWidth > 860} placeholder="Name this event" value={title} onChange={(e) => setTitle(e.target.value)} />
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-          <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+          <div style={{ flex: "1 1 150px" }}>
             <label style={S.fieldLabel}>Date</label>
             <input type="date" style={{ ...S.input, colorScheme: darkMode ? "dark" : "light" }} value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
-          <div>
+          <div style={{ flex: "1 1 100px" }}>
             <label style={S.fieldLabel}>Start</label>
-            <input type="time" style={{ ...S.input, width: 110 }} value={time} onChange={(e) => setTime(e.target.value)} />
+            <input type="time" style={{ ...S.input, width: "100%" }} value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
-          <div>
+          <div style={{ flex: "1 1 90px" }}>
             <label style={S.fieldLabel}>Duration (min)</label>
-            <input type="number" min={5} style={{ ...S.input, width: 90 }} value={dur} onChange={(e) => setDur(e.target.value)} />
+            <input type="number" min={5} style={{ ...S.input, width: "100%" }} value={dur} onChange={(e) => setDur(e.target.value)} />
           </div>
         </div>
 
@@ -1848,14 +1871,14 @@ const S = {
   weekWrap: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
   reasonBar: { fontSize: 12, padding: "8px 18px", borderBottom: `1px solid ${HAIRLINE}`, background: SUBTLE_BG, color: BLACK, flexShrink: 0 },
   weekGridHead: { display: "flex", borderBottom: `1px solid ${HAIRLINE}`, flexShrink: 0 },
-  weekTimeCol: { width: 56, flexShrink: 0 },
-  weekDayHead: { flex: 1, minWidth: 110, textAlign: "center", padding: "8px 0" },
+  weekTimeCol: { width: "var(--week-timecol-w)", flexShrink: 0 },
+  weekDayHead: { flex: 1, minWidth: "var(--week-daycol-w)", textAlign: "center", padding: "8px 0" },
   weekDayName: { fontSize: 10.5, color: GRAY_TEXT, textTransform: "uppercase", letterSpacing: 0.3 },
   weekDayNum: { fontSize: 15, fontWeight: 500, marginTop: 2, display: "inline-flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   weekDayNumToday: { background: ACCENT, color: ACCENT_TEXT },
-  weekScroll: { flex: 1, overflowY: "auto", overflowX: "hidden" },
+  weekScroll: { flex: 1, overflowY: "auto", overflowX: "visible" },
   hourLabel: { position: "absolute", left: 0, fontSize: 10, color: GRAY_TEXT },
-  dayCol: { flex: 1, minWidth: 110, position: "relative", borderLeft: `1px solid ${HAIRLINE}`, touchAction: "none" },
+  dayCol: { flex: 1, minWidth: "var(--week-daycol-w)", position: "relative", borderLeft: `1px solid ${HAIRLINE}`, touchAction: "none" },
   hourLine: { position: "absolute", left: 0, right: 0, borderTop: `1px solid ${HAIRLINE}` },
   salahBlock: {
     position: "absolute", left: 2, right: 2, background: SUBTLE_BG,
@@ -1899,7 +1922,7 @@ const S = {
   modal: {
     width: 420, background: WHITE, border: `1px solid ${HAIRLINE}`, borderRadius: 10, padding: 20,
     boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
-    maxHeight: "calc(100dvh - 32px)", overflowY: "auto",
+    maxHeight: "calc(100dvh - 32px)", overflowY: "auto", overflowX: "hidden",
   },
   modalHead: {
     display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14,

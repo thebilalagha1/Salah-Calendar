@@ -58,7 +58,7 @@ export default function App() {
   if (status === "checking") {
     return (
       <div style={styles.centerScreen}>
-        <style>{`html, body, #root { height: 100%; margin: 0; }`}</style>
+        <style>{`html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; background: #0B0B0D; }`}</style>
         <div style={styles.checkingText}>Loading…</div>
       </div>
     );
@@ -68,7 +68,7 @@ export default function App() {
     return (
       <div style={styles.centerScreen}>
         <style>{`
-          html, body, #root { height: 100%; margin: 0; }
+          html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; background: #0B0B0D; }
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         `}</style>
         <div style={styles.card}>
