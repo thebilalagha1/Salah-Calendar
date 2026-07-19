@@ -976,7 +976,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
           {dates.map((d, i) => (
             <div
               key={dateKey(d)}
-              style={{ ...S.weekDayHead, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}), ...(i === dates.length - 1 ? { borderRight: `1px solid ${HAIRLINE}` } : {}) }}
+              style={{ ...S.weekDayHead, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}) }}
               className={!isSingleDay ? "sc-cell" : undefined}
               onClick={!isSingleDay ? () => onPickDate(d) : undefined}
             >
