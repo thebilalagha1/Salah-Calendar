@@ -5,6 +5,19 @@
 export const SALAH_ORDER = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
 export const SALAH_LABEL = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
 
+// ---------- Judaism (zmanim / tefillot) ----------
+export const JUDAISM_ORDER = ["shacharit", "mincha", "maariv"];
+export const JUDAISM_LABEL = { shacharit: "Shacharit", mincha: "Mincha", maariv: "Maariv" };
+// Manual-fallback placeholders (same role DEFAULT_TIMES plays for Islam) — only
+// used when no location has been detected, so Hebcal can't be queried yet.
+export const DEFAULT_JUDAISM_TIMES = { shacharit: "07:00", mincha: "13:30", maariv: "19:30" };
+export const DEFAULT_JUDAISM_DURATIONS = { shacharit: 20, mincha: 20, maariv: 20 };
+
+// Order/label lookup by religion, for the handful of call sites that need to
+// render generically regardless of which one is active.
+export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER };
+export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL };
+
 export const DAY_START = 0;
 export const DAY_END = 24 * 60;
 
@@ -20,6 +33,12 @@ export const SALAH_WINDOW_COLORS = {
   asr: "#EF6C00",      // deep orange — afternoon
   maghrib: "#C2185B",  // rose — sunset
   isha: "#283593",     // deep indigo — night
+  // Judaism's three tefillot, keyed separately (no collision with the Islam
+  // keys above) so every existing SALAH_WINDOW_COLORS[key] lookup throughout
+  // the UI already works for both religions without further changes.
+  shacharit: "#5C6BC0", // indigo — morning
+  mincha: "#F9A825",    // amber — afternoon
+  maariv: "#283593",    // deep indigo — night
 };
 // Traditionally-discouraged prayer windows get their own warm warning tone,
 // distinct from every salah color above, so they never read as "just another salah".
@@ -92,6 +111,145 @@ export function parseAladhanTimings(json) {
     sunrise: clean(t.Sunrise || t.sunrise),
   };
   return SALAH_ORDER.every((k) => mapped[k]) ? mapped : null;
+}
+
+// ---------- Prayer time provider architecture ----------
+// Shared shape both providers resolve to, per date: a plain object whose keys
+// are the religion's own field names, each an "HH:MM" local wall-clock string
+// (the app already renders everything in local minutes-since-midnight — see
+// buildSalahWindows below — so providers normalize into that instead of
+// threading Date objects through the whole UI layer). This is the pragmatic
+// version of the PrayerWindow interface: same information, shaped so the
+// existing TimelineView/RingView/EventModal code needs zero changes.
+//
+//   AladhanProvider.fetchDate(lat, lng, date, method) -> { fajr, dhuhr, asr, maghrib, isha, sunrise } | null
+//   HebcalProvider.fetchRange(lat, lng, tzid, dates)   -> { [dateKey]: { shacharitStart, shacharitEnd, minchaStart, minchaEnd, maarivStart, sunrise, chatzotNightMin } }
+
+export const AladhanProvider = {
+  religion: "islam",
+  async fetchDate(lat, lng, date, method) {
+    const res = await fetch(buildAladhanCoordsUrl(date, lat, lng, method));
+    const json = await res.json();
+    return parseAladhanTimings(json);
+  },
+};
+
+export function buildHebcalZmanimRangeUrl(lat, lng, tzid, startDate, endDate) {
+  return `https://www.hebcal.com/zmanim?cfg=json&latitude=${lat}&longitude=${lng}&tzid=${encodeURIComponent(tzid)}&start=${dateKey(startDate)}&end=${dateKey(endDate)}`;
+}
+
+function hhmmFromIso(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// Fields needed to build all three tefillah windows. sofZmanTfillaMGA /
+// minchaKetana / plagHaMincha aren't used for v1's windows but are kept on
+// the mapped object so a future stricter-timing settings toggle can read
+// them without another API round-trip.
+const HEBCAL_REQUIRED_FIELDS = ["alotHaShachar", "sofZmanTfilla", "minchaGedola", "sunset", "tzeit7083deg", "chatzotNight", "sunrise"];
+
+function mapHebcalFieldsForDate(fields) {
+  if (!fields || !HEBCAL_REQUIRED_FIELDS.every((f) => fields[f])) return null;
+  const chatzotNightHHMM = hhmmFromIso(fields.chatzotNight);
+  if (!chatzotNightHHMM) return null;
+  return {
+    shacharitStart: hhmmFromIso(fields.alotHaShachar),
+    shacharitEnd: hhmmFromIso(fields.sofZmanTfilla),
+    minchaStart: hhmmFromIso(fields.minchaGedola),
+    minchaEnd: hhmmFromIso(fields.sunset),
+    maarivStart: hhmmFromIso(fields.tzeit7083deg),
+    sunrise: hhmmFromIso(fields.sunrise),
+    chatzotNightMin: toMin(chatzotNightHHMM),
+    // Not read by v1's window builders — reserved for a future Gra/MGA toggle
+    // or minchaKetana/plagHaMincha sub-boundary markers.
+    extra: {
+      sofZmanTfillaMGA: fields.sofZmanTfillaMGA || null,
+      minchaKetana: fields.minchaKetana || null,
+      plagHaMincha: fields.plagHaMincha || null,
+    },
+  };
+}
+
+// Parses a Hebcal /zmanim response into { [dateKeyString]: mappedFields }.
+// Handles both the single-date shape (times.<field> = iso string) and the
+// batch/range shape (times.<field>[dateKeyString] = iso string) — the batch
+// shape is what this app actually uses (see HebcalProvider below), but this
+// stays defensive for a single-date response too.
+export function parseHebcalResponse(json) {
+  const times = json?.times;
+  if (!times) return {};
+  const sample = Object.values(times)[0];
+  const isBatch = sample != null && typeof sample === "object";
+  if (!isBatch) {
+    const mapped = mapHebcalFieldsForDate(times);
+    return mapped && json.date ? { [json.date]: mapped } : {};
+  }
+  const dateKeys = new Set();
+  Object.values(times).forEach((byDate) => Object.keys(byDate || {}).forEach((dk) => dateKeys.add(dk)));
+  const out = {};
+  for (const dk of dateKeys) {
+    const fields = {};
+    for (const field of Object.keys(times)) fields[field] = times[field][dk];
+    const mapped = mapHebcalFieldsForDate(fields);
+    if (mapped) out[dk] = mapped;
+  }
+  return out;
+}
+
+export const HebcalProvider = {
+  religion: "judaism",
+  // Hebcal recommends batching rather than one request per date, and the app
+  // already fetches a whole visible range (single day or the 7 days of a
+  // week) at once — so this issues exactly one request for that range,
+  // extended by one extra trailing day so the last visible date's Maariv
+  // window has a real "next day" chatzotNight to end at (see
+  // buildJudaismWindows). Coordinates are rounded to 3 decimals (~110m) so
+  // GPS jitter doesn't create a fresh cache key on every call.
+  async fetchRange(lat, lng, tzid, dates) {
+    if (!dates || !dates.length) return {};
+    const sorted = [...dates].sort((a, b) => a - b);
+    const start = sorted[0];
+    const end = addDays(sorted[sorted.length - 1], 1);
+    const url = buildHebcalZmanimRangeUrl(+lat.toFixed(3), +lng.toFixed(3), tzid, start, end);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Hebcal request failed (${res.status})`);
+    const json = await res.json();
+    return parseHebcalResponse(json);
+  },
+};
+
+// Shacharit/Mincha/Maariv windows from live Hebcal data for one date.
+// nextDayChatzotNightMin should be the *following* date's chatzotNightMin
+// (Hebcal's chatzotNight for date D is the midpoint of the night ending at
+// D's sunrise, so "tonight's" halachic midnight — the end of tonight's
+// Maariv window — is tomorrow's chatzotNight field, mirroring how Isha's
+// window already uses nextFajr below).
+export function buildJudaismWindows(times, nextDayChatzotNightMin) {
+  const maarivStart = toMin(times.maarivStart);
+  const maarivEnd = nextDayChatzotNightMin != null ? nextDayChatzotNightMin + DAY_END : DAY_END;
+  return [
+    { key: "shacharit", label: JUDAISM_LABEL.shacharit, windowStart: toMin(times.shacharitStart), windowEnd: toMin(times.shacharitEnd) },
+    { key: "mincha", label: JUDAISM_LABEL.mincha, windowStart: toMin(times.minchaStart), windowEnd: toMin(times.minchaEnd) },
+    { key: "maariv", label: JUDAISM_LABEL.maariv, windowStart: maarivStart, windowEnd: maarivEnd },
+  ];
+}
+
+// Generic manual-mode window builder — no solar/halachic edge cases, just
+// "each window runs until the next one starts, last one runs to end of day".
+// Used as the manual fallback for religions without an Islam-style
+// Fajr/sunrise + Isha/midnight special case (currently: Judaism, when no
+// location has been detected yet so Hebcal can't be queried).
+export function buildGenericWindows(order, label, times) {
+  const sorted = order
+    .map((key) => ({ key, label: label[key], start: toMin(times[key]) }))
+    .sort((a, b) => a.start - b.start);
+  return sorted.map((s, i) => {
+    const next = sorted[i + 1];
+    return { key: s.key, label: s.label, windowStart: s.start, windowEnd: next ? next.start : DAY_END };
+  });
 }
 
 export function toMin(hhmm) {

@@ -3,8 +3,9 @@ import {
   SALAH_ORDER, SALAH_LABEL, DAY_START, DAY_END,
   DEFAULT_TIMES, DEFAULT_DURATIONS, DEFAULT_SUNRISE, DEFAULT_METHOD, CALC_METHODS, uid, toMin, fmt12, fmt24, dateKey, sameDay,
   addDays, startOfWeek, startOfMonth, daysInMonth, WEEKDAYS, MONTHS,
-  occursOnDate, instancesForDate, buildSalahBlocks, buildSalahWindows, buildProhibitedWindows, reflow,
-  buildAladhanCoordsUrl, parseAladhanTimings,
+  occursOnDate, instancesForDate, buildSalahWindows, buildProhibitedWindows, reflow,
+  AladhanProvider, HebcalProvider, buildJudaismWindows, buildGenericWindows,
+  JUDAISM_ORDER, JUDAISM_LABEL, DEFAULT_JUDAISM_TIMES, DEFAULT_JUDAISM_DURATIONS, ORDER_BY_RELIGION, LABEL_BY_RELIGION,
   EVENT_COLORS, DEFAULT_EVENT_COLOR, hexToRgba,
   SALAH_WINDOW_COLORS, PROHIBITED_COLOR,
 } from "./engine.js";
@@ -81,9 +82,17 @@ const Icon = {
 export default function SalahCalendar({ user, onLogout }) {
   const [view, setView] = useState("ring"); // ring | day | week | month | year
   const [cursor, setCursor] = useState(new Date());
-  const [salahTimes, setSalahTimes] = useState(DEFAULT_TIMES); // manual fallback template
-  const [durations, setDurations] = useState(DEFAULT_DURATIONS);
+  // religion: "islam" | "judaism" | null (null = not chosen yet, show the picker)
+  const [religion, setReligion] = useState(null);
+  // Manual fallback templates hold BOTH religions' keys at once (fajr..isha
+  // and shacharit/mincha/maariv) — one settings blob, no per-religion storage
+  // key, switching religions later just reads a different subset of keys.
+  const [salahTimes, setSalahTimes] = useState({ ...DEFAULT_TIMES, ...DEFAULT_JUDAISM_TIMES });
+  const [durations, setDurations] = useState({ ...DEFAULT_DURATIONS, ...DEFAULT_JUDAISM_DURATIONS });
   const [sunrise, setSunrise] = useState(DEFAULT_SUNRISE); // manual fallback, used for Fajr's window end + shading
+  const activeOrder = religion === "judaism" ? JUDAISM_ORDER : SALAH_ORDER;
+  const activeLabel = religion === "judaism" ? JUDAISM_LABEL : SALAH_LABEL;
+  const hasProhibited = religion !== "judaism"; // no halachic equivalent to makruh prayer times
   const [tasks, setTasks] = useState(SEED_TASKS);
   const [showSettings, setShowSettings] = useState(false);
   const [modal, setModal] = useState(null); // { date } or { editing: task }
@@ -129,14 +138,15 @@ export default function SalahCalendar({ user, onLogout }) {
         const stRaw = await store.get("settings");
         if (stRaw) {
           const s = JSON.parse(stRaw);
-          if (s.salahTimes) setSalahTimes(s.salahTimes);
-          if (s.durations) setDurations(s.durations);
+          if (s.salahTimes) setSalahTimes((prev) => ({ ...prev, ...s.salahTimes }));
+          if (s.durations) setDurations((prev) => ({ ...prev, ...s.durations }));
           if (s.sunrise) setSunrise(s.sunrise);
           if (typeof s.darkMode === "boolean") setDarkMode(s.darkMode);
           if (typeof s.use24h === "boolean") setUse24h(s.use24h);
           if (s.locationMode) setLocationMode(s.locationMode);
           if (s.coords) setCoords(s.coords);
           if (typeof s.method === "number") setMethod(s.method);
+          if (s.religion === "islam" || s.religion === "judaism") setReligion(s.religion);
         }
       } catch {
         // no saved settings yet — keep the defaults
@@ -152,54 +162,98 @@ export default function SalahCalendar({ user, onLogout }) {
 
   useEffect(() => {
     if (!storageLoaded) return;
-    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, darkMode, use24h, locationMode, coords, method }));
+    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, darkMode, use24h, locationMode, coords, method, religion }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [salahTimes, durations, sunrise, darkMode, use24h, locationMode, coords, method, storageLoaded]);
+  }, [salahTimes, durations, sunrise, darkMode, use24h, locationMode, coords, method, religion, storageLoaded]);
+
+  // Browser's IANA zone — passed to Hebcal as tzid. In practice this matches
+  // the location the user detected coordinates for, since both come from the
+  // same device; a per-location tzid lookup would be more rigorous but isn't
+  // needed for v1.
+  const tzid = useMemo(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
+  }, []);
 
   function getTimesForDate(date) {
-    // Cached AlAdhan entries already carry their own sunrise; the manual
-    // fallback template doesn't have a per-key sunrise, so attach the
-    // manual sunrise setting to it here.
+    // Live provider entries carry their own sunrise (and, for Judaism, every
+    // other zmanim field); the manual fallback template doesn't have a
+    // per-key sunrise, so attach the manual sunrise setting to it here.
     return timesByDate[dateKey(date)] || { ...salahTimes, sunrise };
   }
-  function salahBlocksForDate(date) {
-    return buildSalahBlocks(getTimesForDate(date), durations);
-  }
-  function salahWindowsForDate(date) {
+
+  // Windows first (each religion's own edge-case logic lives in engine.js),
+  // then blocks are derived from windows: a window's start IS the prayer's
+  // own clock time for both religions (buildSalahWindows already sets each
+  // Islam window's start to that salah's own time; buildJudaismWindows does
+  // the same for shacharit/mincha/maariv), so one function covers both.
+  function windowsForDate(date) {
+    if (religion === "judaism") {
+      const live = timesByDate[dateKey(date)];
+      if (live) {
+        const nextLive = timesByDate[dateKey(addDays(date, 1))];
+        return buildJudaismWindows(live, nextLive ? nextLive.chatzotNightMin : null);
+      }
+      return buildGenericWindows(JUDAISM_ORDER, JUDAISM_LABEL, salahTimes);
+    }
     const t = getTimesForDate(date);
     const nextFajr = getTimesForDate(addDays(date, 1)).fajr;
     return buildSalahWindows(t, t.sunrise, nextFajr);
   }
+  function salahBlocksForDate(date) {
+    return windowsForDate(date)
+      .map((w) => {
+        const dur = durations[w.key] ?? 20;
+        return { key: w.key, label: w.label, start: w.windowStart, end: w.windowStart + dur, dur };
+      })
+      .sort((a, b) => a.start - b.start);
+  }
+  function salahWindowsForDate(date) {
+    return windowsForDate(date);
+  }
   function prohibitedWindowsForDate(date) {
+    if (!hasProhibited) return []; // no halachic equivalent for Judaism's three tefillot
     const t = getTimesForDate(date);
     return buildProhibitedWindows(t, t.sunrise);
   }
 
-  const fetchTimesForDate = useCallback(async (date) => {
+  const fetchIslamDate = useCallback(async (date) => {
     const key = dateKey(date);
-    if (locationMode === "manual" || inFlightRef.has(key)) return;
+    if (locationMode === "manual" || !coords || inFlightRef.has(key)) return;
     inFlightRef.add(key);
     try {
-      const url =
-        locationMode === "coords" && coords
-          ? buildAladhanCoordsUrl(date, coords.lat, coords.lng, method)
-          : null;
-      if (!url) return;
-      const res = await fetch(url);
-      const json = await res.json();
-      const mapped = parseAladhanTimings(json);
+      const mapped = await AladhanProvider.fetchDate(coords.lat, coords.lng, date, method);
       if (mapped) {
         setTimesByDate((prev) => ({ ...prev, [key]: mapped }));
         setFetchStatus("ok");
       } else {
         setFetchStatus("error");
       }
-    } catch (e) {
+    } catch {
       setFetchStatus("error");
     } finally {
       inFlightRef.delete(key);
     }
   }, [locationMode, coords, method]);
+
+  const fetchJudaismRange = useCallback(async (dates) => {
+    if (locationMode === "manual" || !coords || !dates.length) return;
+    const rangeKey = `hebcal:${dates.map(dateKey).join(",")}`;
+    if (inFlightRef.has(rangeKey)) return;
+    inFlightRef.add(rangeKey);
+    try {
+      const byDate = await HebcalProvider.fetchRange(coords.lat, coords.lng, tzid, dates);
+      if (Object.keys(byDate).length) {
+        setTimesByDate((prev) => ({ ...prev, ...byDate }));
+        setFetchStatus("ok");
+      } else {
+        setFetchStatus("error");
+      }
+    } catch {
+      setFetchStatus("error");
+    } finally {
+      inFlightRef.delete(rangeKey);
+    }
+  }, [locationMode, coords, tzid]);
 
   // Auto-fetch prayer times for whichever dates are currently visible (day/week/ring views).
   useEffect(() => {
@@ -211,9 +265,21 @@ export default function SalahCalendar({ user, onLogout }) {
       dates = Array.from({ length: 7 }, (_, i) => addDays(start, i));
     } else return; // month/year don't need salah blocks
     const missing = dates.filter((d) => !timesByDate[dateKey(d)]);
-    missing.forEach((d) => fetchTimesForDate(d));
+    if (!missing.length) return;
+    if (religion === "judaism") {
+      fetchJudaismRange(missing); // one batch call for the whole visible range
+    } else {
+      missing.forEach((d) => fetchIslamDate(d));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, dateKey(cursor), locationMode, coords, method]);
+  }, [view, dateKey(cursor), locationMode, coords, method, religion]);
+
+  // The two religions' cached entries have different field shapes (Islam:
+  // fajr/dhuhr/... ; Judaism: shacharitStart/minchaStart/...), so clear the
+  // cache whenever religion changes rather than risk mixing shapes.
+  useEffect(() => {
+    setTimesByDate({});
+  }, [religion]);
 
   function detectLocation() {
     if (!navigator.geolocation) {
@@ -257,6 +323,15 @@ export default function SalahCalendar({ user, onLogout }) {
   }
 
   const theme = darkMode ? THEME_DARK : THEME_LIGHT;
+
+  if (storageLoaded && !religion) {
+    return (
+      <ReligionPicker
+        darkMode={darkMode}
+        onPick={(r) => setReligion(r)}
+      />
+    );
+  }
 
   return (
     <div className="sc-app" style={{ ...S.app, ...theme }}>
@@ -504,17 +579,19 @@ export default function SalahCalendar({ user, onLogout }) {
             </button>
           </div>
           <div style={S.legend} className="sc-legend">
-            <span style={S.legendItem} title={`The prayer's exact time block, colored per salah — ${SALAH_ORDER.map((k) => SALAH_LABEL[k]).join(", ")}`}>
-              <i style={S.legendSwatchSalah} />Salah
+            <span style={S.legendItem} title={`The prayer's exact time block, colored per prayer — ${activeOrder.map((k) => activeLabel[k]).join(", ")}`}>
+              <i style={{ ...S.legendSwatchSalah, backgroundImage: salahBandsCss(activeOrder) }} />{religion === "judaism" ? "Tefillah" : "Salah"}
             </span>
             {(view === "day" || view === "week" || view === "ring") && (
               <>
-                <span style={S.legendItem} title={`Prayer window, colored per salah — ${SALAH_ORDER.map((k) => SALAH_LABEL[k]).join(", ")}`}>
-                  <i style={S.legendSwatchWindow} />Prayer window
+                <span style={S.legendItem} title={`Prayer window, colored per prayer — ${activeOrder.map((k) => activeLabel[k]).join(", ")}`}>
+                  <i style={{ ...S.legendSwatchWindow, backgroundImage: salahBandsCss(activeOrder) }} />Prayer window
                 </span>
-                <span style={S.legendItem} title="Approximate — times traditionally treated as discouraged for prayer (just after sunrise, around solar noon, just before sunset)">
-                  <i style={S.legendSwatchProhibited} />Discouraged
-                </span>
+                {hasProhibited && (
+                  <span style={S.legendItem} title="Approximate — times traditionally treated as discouraged for prayer (just after sunrise, around solar noon, just before sunset)">
+                    <i style={S.legendSwatchProhibited} />Discouraged
+                  </span>
+                )}
               </>
             )}
             <span style={S.legendItem}><i style={S.legendSwatchFixed} />Fixed</span>
@@ -530,6 +607,7 @@ export default function SalahCalendar({ user, onLogout }) {
               salahBlocksForDate={salahBlocksForDate}
               salahWindowsForDate={salahWindowsForDate}
               prohibitedWindowsForDate={prohibitedWindowsForDate}
+              religion={religion}
               onEditTask={(t) => setModal({ editing: t })}
               onViewSalah={(date, block, win) => setSalahDetail({ date, block, win })}
               use24h={use24h}
@@ -558,6 +636,8 @@ export default function SalahCalendar({ user, onLogout }) {
               salahBlocksForDate={salahBlocksForDate}
               salahWindowsForDate={salahWindowsForDate}
               prohibitedWindowsForDate={prohibitedWindowsForDate}
+              activeOrder={activeOrder}
+              activeLabel={activeLabel}
               onEditTask={(t) => setModal({ editing: t })}
               onViewSalah={(date, block, win) => setSalahDetail({ date, block, win })}
               onAddAt={(date, startMin, durMin) => setModal({ date, start: startMin, dur: durMin })}
@@ -575,6 +655,8 @@ export default function SalahCalendar({ user, onLogout }) {
               salahBlocksForDate={salahBlocksForDate}
               salahWindowsForDate={salahWindowsForDate}
               prohibitedWindowsForDate={prohibitedWindowsForDate}
+              activeOrder={activeOrder}
+              activeLabel={activeLabel}
               onEditTask={(t) => setModal({ editing: t })}
               onViewSalah={(date, block, win) => setSalahDetail({ date, block, win })}
               onAddAt={(date, startMin, durMin) => setModal({ date, start: startMin, dur: durMin })}
@@ -629,6 +711,16 @@ export default function SalahCalendar({ user, onLogout }) {
               </button>
             </div>
 
+            <div style={S.sectionLabel}>Calendar</div>
+            <div style={S.segmented}>
+              <button className="sc-btn" style={{ ...S.segBtn, ...(religion !== "judaism" ? S.segBtnActive : {}) }} onClick={() => setReligion("islam")}>
+                Islam
+              </button>
+              <button className="sc-btn" style={{ ...S.segBtn, ...(religion === "judaism" ? S.segBtnActive : {}) }} onClick={() => setReligion("judaism")}>
+                Judaism
+              </button>
+            </div>
+
             <div style={S.sectionLabel}>Prayer time source</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button className="sc-btn" style={{ ...S.darkBtn, justifyContent: "center", width: "100%" }} onClick={detectLocation}>
@@ -640,23 +732,35 @@ export default function SalahCalendar({ user, onLogout }) {
               )}
               {locStatus === "error" && <div style={S.statusErr}>Couldn't get your location. Check your browser's location permission and try again.</div>}
 
-              <div className="sc-settings-row" style={S.settingsRow}>
-                <div style={S.settingsLabel}>Method</div>
-                <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
-                  {CALC_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
+              {religion !== "judaism" && (
+                <div className="sc-settings-row" style={S.settingsRow}>
+                  <div style={S.settingsLabel}>Method</div>
+                  <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
+                    {CALC_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </div>
+              )}
 
-              {locationMode !== "manual" && fetchStatus === "ok" && <div style={S.statusOk}>Prayer times are live from AlAdhan for your location.</div>}
+              {locationMode !== "manual" && fetchStatus === "ok" && (
+                <div style={S.statusOk}>Prayer times are live from {religion === "judaism" ? "Hebcal" : "AlAdhan"} for your location.</div>
+              )}
               {locationMode !== "manual" && fetchStatus === "error" && <div style={S.statusErr}>Couldn't fetch times — showing manual defaults below instead.</div>}
-              {locationMode === "manual" && <div style={S.hint}>No location set yet — using the manual times below for every day. Detect your location to pull real daily times from AlAdhan.</div>}
+              {locationMode === "manual" && (
+                <div style={S.hint}>No location set yet — using the manual times below for every day. Detect your location to pull real daily times from {religion === "judaism" ? "Hebcal" : "AlAdhan"}.</div>
+              )}
+              {religion === "judaism" && (
+                <div style={S.hint}>
+                  Zmanim times courtesy of <a href="https://www.hebcal.com" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>Hebcal.com</a>, licensed under{" "}
+                  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>CC BY 4.0</a>.
+                </div>
+              )}
             </div>
 
             <div style={S.sectionLabel}>Manual times {locationMode !== "manual" ? "(fallback)" : ""} and window length</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {SALAH_ORDER.map((key) => (
+              {activeOrder.map((key) => (
                 <div key={key} className="sc-settings-row" style={S.settingsRow}>
-                  <div style={S.settingsLabel}>{SALAH_LABEL[key]}</div>
+                  <div style={S.settingsLabel}>{activeLabel[key]}</div>
                   <input type="time" value={salahTimes[key]} onChange={(e) => setSalahTimes((s) => ({ ...s, [key]: e.target.value }))} style={{ ...S.timeInput, colorScheme: darkMode ? "dark" : "light" }} />
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
                     <input
@@ -669,21 +773,27 @@ export default function SalahCalendar({ user, onLogout }) {
                   </div>
                 </div>
               ))}
-              <div className="sc-settings-row" style={S.settingsRow}>
-                <div style={S.settingsLabel}>Sunrise</div>
-                <input
-                  type="time"
-                  value={sunrise}
-                  onChange={(e) => setSunrise(e.target.value)}
-                  style={{ ...S.timeInput, colorScheme: darkMode ? "dark" : "light" }}
-                />
-                <span style={{ ...S.durUnit, marginLeft: "auto" }}>ends Fajr's window</span>
-              </div>
+              {religion !== "judaism" && (
+                <div className="sc-settings-row" style={S.settingsRow}>
+                  <div style={S.settingsLabel}>Sunrise</div>
+                  <input
+                    type="time"
+                    value={sunrise}
+                    onChange={(e) => setSunrise(e.target.value)}
+                    style={{ ...S.timeInput, colorScheme: darkMode ? "dark" : "light" }}
+                  />
+                  <span style={{ ...S.durUnit, marginLeft: "auto" }}>ends Fajr's window</span>
+                </div>
+              )}
             </div>
             <p style={S.hint}>
-              {locationMode !== "manual"
-                ? "Sunrise is pulled from AlAdhan automatically; the time above is only used as a fallback."
-                : "Used to shade the Fajr prayer window on the calendar and mark the post-sunrise discouraged time."}
+              {religion === "judaism"
+                ? (locationMode !== "manual"
+                    ? "Shacharit, Mincha, and Maariv windows are pulled from Hebcal automatically; the times above are only used as a fallback."
+                    : "Each window runs until the next one starts, so these times only set where each window begins.")
+                : (locationMode !== "manual"
+                    ? "Sunrise is pulled from AlAdhan automatically; the time above is only used as a fallback."
+                    : "Used to shade the Fajr prayer window on the calendar and mark the post-sunrise discouraged time.")}
             </p>
           </div>
         </div>
@@ -711,6 +821,51 @@ export default function SalahCalendar({ user, onLogout }) {
     </div>
   );
 }
+
+// One-time picker shown after sign-in until a religion is chosen. The choice
+// is persisted through the same settings kv blob as everything else (see the
+// storage effects above) — this component itself has no storage logic.
+function ReligionPicker({ darkMode, onPick }) {
+  const theme = darkMode ? THEME_DARK : THEME_LIGHT;
+  return (
+    <div style={{ ...styles_rp.screen, ...theme }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; background: ${darkMode ? "#18181B" : "#FFFFFF"}; }
+      `}</style>
+      <div style={styles_rp.card}>
+        <div style={styles_rp.title}>Which calendar would you like?</div>
+        <div style={styles_rp.subtitle}>This sets which prayer schedule shows up — you can change it later in Settings.</div>
+        <button className="sc-btn" style={styles_rp.optionBtn} onClick={() => onPick("islam")}>
+          <div style={styles_rp.optionTitle}>Islam</div>
+          <div style={styles_rp.optionDesc}>Fajr, Dhuhr, Asr, Maghrib, Isha — via AlAdhan</div>
+        </button>
+        <button className="sc-btn" style={styles_rp.optionBtn} onClick={() => onPick("judaism")}>
+          <div style={styles_rp.optionTitle}>Judaism</div>
+          <div style={styles_rp.optionDesc}>Shacharit, Mincha, Maariv — via Hebcal.com</div>
+        </button>
+      </div>
+    </div>
+  );
+}
+const styles_rp = {
+  screen: {
+    width: "100vw", height: "100dvh", minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center",
+    background: "var(--bg)", color: "var(--ink)", fontFamily: "'Inter', system-ui, -apple-system, sans-serif", padding: 20, boxSizing: "border-box",
+  },
+  card: {
+    width: "min(360px, 100%)", padding: "32px 28px", borderRadius: 16, border: "1px solid var(--hairline)",
+    background: "var(--surface)", display: "flex", flexDirection: "column", gap: 10, boxSizing: "border-box",
+  },
+  title: { fontSize: 17, fontWeight: 600, textAlign: "center" },
+  subtitle: { fontSize: 12.5, color: "var(--muted)", textAlign: "center", lineHeight: 1.5, marginBottom: 10 },
+  optionBtn: {
+    display: "flex", flexDirection: "column", gap: 3, textAlign: "left", padding: "14px 16px", borderRadius: 10,
+    border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", fontFamily: "inherit",
+  },
+  optionTitle: { fontSize: 14.5, fontWeight: 600 },
+  optionDesc: { fontSize: 12, color: "var(--muted)" },
+};
 
 function weekLabel(cursor) {
   const start = startOfWeek(cursor);
@@ -859,7 +1014,7 @@ function MonthView({ cursor, tasks, onPickDay, onAddOnDay, use24h }) {
 // ============================================================
 // Timeline view (Day = 1 column, Week = 7 columns) with salah reflow
 // ============================================================
-function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, onEditTask, onViewSalah, onAddAt, onPickDate, lastNotes, setLastNotes, use24h, isMobile }) {
+function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, activeOrder, activeLabel, onEditTask, onViewSalah, onAddAt, onPickDate, lastNotes, setLastNotes, use24h, isMobile }) {
   const fmtT = use24h ? fmt24 : fmt12;
   const isSingleDay = dates.length === 1;
   const colRefs = useRef({});
@@ -910,17 +1065,19 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
       const blocks = salahBlocksForDate(d);
       const windows = salahWindowsForDate(d);
       const prohibited = prohibitedWindowsForDate(d);
-      // Isha's window can run past midnight into Islamic midnight. Clamp each
+      // The last prayer of the day (Isha for Islam, Maariv for Judaism) can
+      // run past midnight into halachic/Islamic midnight. Clamp each
       // window's rendered height to the visible day, then carry yesterday's
-      // Isha overflow in as a short strip at the very top of today so the
+      // overflow in as a short strip at the very top of today so the
       // extension is visible. `realEnd` keeps the true, unclamped end time
-      // (which may read past 24:00) so labels can show Isha's actual end
-      // time instead of a misleading flat "12:00am".
-      const prevIsha = salahWindowsForDate(addDays(d, -1)).find((w) => w.key === "isha");
-      const overflow = prevIsha ? prevIsha.windowEnd - DAY_END : 0;
+      // (which may read past 24:00) so labels can show the real end time
+      // instead of a misleading flat "12:00am".
+      const lastKey = activeOrder[activeOrder.length - 1];
+      const prevLast = salahWindowsForDate(addDays(d, -1)).find((w) => w.key === lastKey);
+      const overflow = prevLast ? prevLast.windowEnd - DAY_END : 0;
       const displayWindows = windows.map((w) => ({ ...w, realEnd: w.windowEnd, windowEnd: Math.min(w.windowEnd, DAY_END) }));
       if (overflow > 0) {
-        displayWindows.unshift({ key: "isha", label: "Isha", windowStart: DAY_START, windowEnd: DAY_START + overflow, realEnd: DAY_START + overflow, continued: true });
+        displayWindows.unshift({ key: lastKey, label: activeLabel[lastKey], windowStart: DAY_START, windowEnd: DAY_START + overflow, realEnd: DAY_START + overflow, continued: true });
       }
       const { tasks: laidOut, notes } = reflow(dayTasks, blocks);
       return { date: d, tasks: laidOut, notes, blocks, windows: displayWindows, prohibited };
@@ -1252,8 +1409,9 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
 // ============================================================
 // Ring view — the whole day laid out as a 24-hour color-coded ring
 // ============================================================
-function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, onEditTask, onViewSalah, use24h }) {
+function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, religion, onEditTask, onViewSalah, use24h }) {
   const fmtT = use24h ? fmt24 : fmt12;
+  const kindLabel = religion === "judaism" ? "Tefillah" : "Salah";
   const [hovered, setHovered] = useState(null); // { key, title, start, dur, kind }
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
 
@@ -1293,7 +1451,7 @@ function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, proh
 
   // Legend combines both rings: salah events (outer) and non-salah events (inner).
   const legendItems = [
-    ...blocks.map((s) => ({ key: `salah:${s.key}`, title: s.label, start: s.start, dur: s.dur, kind: "Salah", color: SALAH_WINDOW_COLORS[s.key], isSalah: true, salahBlock: s })),
+    ...blocks.map((s) => ({ key: `salah:${s.key}`, title: s.label, start: s.start, dur: s.dur, kind: kindLabel, color: SALAH_WINDOW_COLORS[s.key], isSalah: true, salahBlock: s })),
     ...dayTasks.map((t) => ({
       key: t.occurrenceKey || t.id, title: t.title, start: t.start, dur: t.dur,
       kind: t.movable ? "Movable" : "Fixed", color: t.color || DEFAULT_EVENT_COLOR, task: t,
@@ -1386,7 +1544,7 @@ function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, proh
                 pathLength={1440}
                 strokeLinecap="butt"
                 opacity={0.95}
-                onMouseEnter={() => setHovered({ key, title: s.label, start: s.start, dur: s.dur, kind: "Salah" })}
+                onMouseEnter={() => setHovered({ key, title: s.label, start: s.start, dur: s.dur, kind: kindLabel })}
                 onMouseLeave={() => setHovered(null)}
                 onClick={() => onViewSalah && onViewSalah(cursor, s, windows.find((w) => w.key === s.key))}
               />
@@ -1742,7 +1900,7 @@ function SalahDetailModal({ data, onClose, use24h }) {
           )}
         </div>
 
-        <p style={S.hint}>Prayer times are calculated automatically and can't be edited directly — adjust the calculation method or location in Settings instead.</p>
+        <p style={S.hint}>Prayer times are calculated automatically and can't be edited directly — adjust the location (or calculation method, for Islam) in Settings instead.</p>
 
         <div style={{ ...S.modalFooter, justifyContent: "flex-end" }}>
           <button className="sc-btn" style={S.textBtn} onClick={onClose}>Close</button>
@@ -1785,14 +1943,16 @@ const THEME_DARK = {
   "--accent-ink": "#111111",
 };
 
-// Builds a CSS gradient with hard color stops (no blending) across the five
-// salah colors — used for legend swatches so they accurately show "one flat
-// color per salah" rather than a smoothly-blended gradient, which doesn't
-// correspond to anything the app actually renders.
-function salahBandsCss() {
-  const n = SALAH_ORDER.length;
+// Builds a CSS gradient with hard color stops (no blending) across the
+// active religion's prayer colors — used for legend swatches so they
+// accurately show "one flat color per prayer" rather than a smoothly-blended
+// gradient, which doesn't correspond to anything the app actually renders.
+// Defaults to the Islam order so any stray no-arg call (e.g. before a
+// religion is chosen) still renders something reasonable.
+function salahBandsCss(order = SALAH_ORDER) {
+  const n = order.length;
   const stops = [];
-  SALAH_ORDER.forEach((k, i) => {
+  order.forEach((k, i) => {
     const from = (i / n) * 100;
     const to = ((i + 1) / n) * 100;
     const c = SALAH_WINDOW_COLORS[k];
