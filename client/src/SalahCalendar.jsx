@@ -10,6 +10,7 @@ import {
 } from "./engine.js";
 
 import { API_BASE_URL } from "./config.js";
+import { authHeaders } from "./authToken.js";
 import qamuWordmark from "./assets/qamu-wordmark.png";
 import qamuIcon from "./assets/qamu-icon.png";
 
@@ -17,14 +18,17 @@ const PX_PER_MIN = 1.1;
 
 // ---------- storage adapter ----------
 // Backed by the Express/SQLite API in server/, scoped to whichever Google
-// account is signed in (auth cookie is sent automatically via
-// credentials:"include"). Same get/set(key, value) shape the rest of this
-// file already expects, so nothing below this block needed to change.
+// account is signed in. Auth is a bearer token (see authToken.js) sent
+// explicitly on every request, rather than a cookie — cookies aren't
+// reliably sent on cross-site requests (client on vercel.app, server on a
+// different origin) in every browser, which was silently breaking sync
+// across devices. Same get/set(key, value) shape the rest of this file
+// already expects, so nothing below this block needed to change.
 const store = {
   async get(key) {
     try {
       const res = await fetch(`${API_BASE_URL}/api/kv/${encodeURIComponent(key)}`, {
-        credentials: "include",
+        headers: { ...authHeaders() },
       });
       if (!res.ok) return null; // 404 = nothing saved yet, 401 = signed out
       const data = await res.json();
@@ -38,8 +42,7 @@ const store = {
     try {
       await fetch(`${API_BASE_URL}/api/kv/${encodeURIComponent(key)}`, {
         method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ value }),
       });
     } catch {

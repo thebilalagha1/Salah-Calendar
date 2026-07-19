@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { API_BASE_URL } from "./config.js";
+import { getToken, setToken, clearToken, authHeaders } from "./authToken.js";
 import SalahCalendar from "./SalahCalendar.jsx";
 import qamuWordmark from "./assets/qamu-wordmark.png";
 
@@ -9,11 +10,17 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [error, setError] = useState("");
 
-  // On load, see if there's already a valid session cookie from a previous visit.
+  // On load, see if we already have a saved token from a previous visit and
+  // whether it's still valid.
   useEffect(() => {
     (async () => {
+      const token = getToken();
+      if (!token) {
+        setStatus("signedOut");
+        return;
+      }
       try {
-        const res = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: "include" });
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { ...authHeaders() } });
         if (res.ok) {
           const data = await res.json();
           setUser(data.user);
@@ -23,6 +30,8 @@ export default function App() {
       } catch {
         // network error — fall through to signed-out screen
       }
+      // token missing/expired/invalid — clear it and start fresh
+      clearToken();
       setStatus("signedOut");
     })();
   }, []);
@@ -32,12 +41,12 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/google`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credential: credentialResponse.credential }),
       });
       if (!res.ok) throw new Error("Sign-in failed");
       const data = await res.json();
+      setToken(data.token);
       setUser(data.user);
       setStatus("signedIn");
     } catch {
@@ -47,10 +56,11 @@ export default function App() {
 
   async function handleLogout() {
     try {
-      await fetch(`${API_BASE_URL}/api/auth/logout`, { method: "POST", credentials: "include" });
+      await fetch(`${API_BASE_URL}/api/auth/logout`, { method: "POST", headers: { ...authHeaders() } });
     } catch {
       // ignore — clearing local state below is enough for the UI
     }
+    clearToken();
     setUser(null);
     setStatus("signedOut");
   }

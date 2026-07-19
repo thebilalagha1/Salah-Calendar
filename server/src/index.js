@@ -1,10 +1,9 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import cookieParser from "cookie-parser";
 import { OAuth2Client } from "google-auth-library";
 import { upsertUser, getUser, getValue, setValue } from "./db.js";
-import { issueSession, clearSession, requireAuth } from "./auth.js";
+import { signToken, requireAuth } from "./auth.js";
 
 const required = ["GOOGLE_CLIENT_ID", "JWT_SECRET", "CLIENT_URL"];
 for (const key of required) {
@@ -17,9 +16,12 @@ for (const key of required) {
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+// No cookies involved anymore (auth is a bearer token the client sends
+// itself), so this doesn't need `credentials: true` — a plain origin
+// allowlist is enough, and it sidesteps any cookie/SameSite config drift
+// between environments.
+app.use(cors({ origin: process.env.CLIENT_URL }));
 app.use(express.json());
-app.use(cookieParser());
 
 // ---- auth ----
 
@@ -49,12 +51,16 @@ app.post("/api/auth/google", async (req, res) => {
     picture: payload.picture,
   });
 
-  issueSession(res, user);
-  res.json({ user });
+  const token = signToken(user);
+  res.json({ user, token });
 });
 
+// Stateless JWTs can't be revoked server-side without a blocklist we don't
+// have yet — logging out is really just the client discarding the token it
+// holds. This route stays so the client has something to call for symmetry
+// (and as a hook if we ever add revocation), but there's no server state to
+// clear today.
 app.post("/api/auth/logout", (req, res) => {
-  clearSession(res);
   res.json({ ok: true });
 });
 

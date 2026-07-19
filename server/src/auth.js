@@ -1,32 +1,26 @@
 import jwt from "jsonwebtoken";
 
-const SESSION_COOKIE = "session";
-const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const TOKEN_MAX_AGE = "30d";
 
-export function issueSession(res, user) {
-  const token = jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-  const secure = process.env.COOKIE_SECURE === "true";
-  res.cookie(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure,
-    // "none" is required for the cookie to be sent on cross-site requests
-    // (client on vercel.app, server on onrender.com are different sites).
-    // Browsers only accept SameSite=None when Secure is also true, which is
-    // why this is tied to COOKIE_SECURE rather than hardcoded.
-    sameSite: secure ? "none" : "lax",
-    maxAge: SESSION_MAX_AGE_MS,
-    path: "/",
-  });
+// Bearer-token auth instead of cookies. The client stores this token itself
+// (localStorage) and sends it explicitly via the Authorization header on
+// every request. This avoids relying on the browser to carry a session
+// cookie across a cross-site request (client on vercel.app, server on
+// onrender.com) — browsers routinely refuse to send cross-site cookies
+// (Safari always blocks third-party cookies by default; other browsers can
+// too depending on SameSite/Secure config), which was causing signed-in
+// users on a second device to silently look "signed in" but never actually
+// be able to read/write their data.
+export function signToken(user) {
+  return jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { expiresIn: TOKEN_MAX_AGE });
 }
 
-export function clearSession(res) {
-  res.clearCookie(SESSION_COOKIE, { path: "/" });
-}
-
-// Reads the session cookie, verifies it, and attaches req.userId.
-// Responds 401 if missing/invalid — routes behind this can assume req.userId is set.
+// Reads the "Authorization: Bearer <token>" header, verifies it, and
+// attaches req.userId. Responds 401 if missing/invalid — routes behind this
+// can assume req.userId is set.
 export function requireAuth(req, res, next) {
-  const token = req.cookies?.[SESSION_COOKIE];
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
   if (!token) return res.status(401).json({ error: "not_authenticated" });
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
