@@ -116,6 +116,15 @@ export function fmt24(min) {
 export function dateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+// Parses a "YYYY-MM-DD" string (as produced by dateKey / <input type="date">) into
+// a LOCAL Date at local midnight. Do not use `new Date(dateString)` for this: the
+// JS spec parses bare date-only ISO strings as UTC midnight, which lands on the
+// previous local calendar day for any timezone behind UTC (all of the US, etc.) —
+// that off-by-one is what was causing events to appear a day earlier than saved.
+export function parseDateKey(s) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
 export function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -152,12 +161,12 @@ export const MONTHS = [
 export function occursOnDate(task, date) {
   const target = new Date(date);
   target.setHours(0, 0, 0, 0);
-  const anchor = new Date(task.date);
+  const anchor = parseDateKey(task.date);
   anchor.setHours(0, 0, 0, 0);
 
   if (target < anchor) return false;
   if (task.repeatUntil) {
-    const until = new Date(task.repeatUntil);
+    const until = parseDateKey(task.repeatUntil);
     until.setHours(0, 0, 0, 0);
     if (target > until) return false;
   }
