@@ -973,10 +973,10 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
       >
         <div style={S.weekGridHead}>
           <div style={S.weekTimeCol} />
-          {dates.map((d) => (
+          {dates.map((d, i) => (
             <div
               key={dateKey(d)}
-              style={{ ...S.weekDayHead, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}) }}
+              style={{ ...S.weekDayHead, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}), ...(i === dates.length - 1 ? { borderRight: `1px solid ${HAIRLINE}` } : {}) }}
               className={!isSingleDay ? "sc-cell" : undefined}
               onClick={!isSingleDay ? () => onPickDate(d) : undefined}
             >
@@ -995,13 +995,13 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
               ))}
             </div>
 
-          {dayData.map(({ date, tasks: dayTasks, blocks, windows, prohibited }) => {
+          {dayData.map(({ date, tasks: dayTasks, blocks, windows, prohibited }, dayIdx) => {
             const colKey = dateKey(date);
             return (
               <div
                 key={colKey}
                 ref={(el) => { colRefs.current[colKey] = el; }}
-                style={{ ...S.dayCol, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}), cursor: "pointer" }}
+                style={{ ...S.dayCol, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}), ...(dayIdx === dayData.length - 1 ? { borderRight: `1px solid ${HAIRLINE}` } : {}), cursor: "pointer" }}
                 onPointerDown={(e) => {
                   if (!e.isPrimary) return;
                   if (e.target !== e.currentTarget) return;
