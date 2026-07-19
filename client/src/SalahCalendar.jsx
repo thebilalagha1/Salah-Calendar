@@ -353,6 +353,8 @@ export default function SalahCalendar({ user, onLogout }) {
 
         input, select, textarea { font-family: 'Inter', sans-serif; }
         input[type="time"]::-webkit-calendar-picker-indicator, input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+        input[type="time"]::-webkit-datetime-edit, input[type="date"]::-webkit-datetime-edit { flex: 0 1 auto; text-align: left; padding: 0; }
+        input[type="time"]::-webkit-datetime-edit-fields-wrapper, input[type="date"]::-webkit-datetime-edit-fields-wrapper { display: flex; }
 
         /* only rendered at all when isMobile (see JSX) — dims the calendar
            behind the overlaid sidebar and closes it on tap */
@@ -1557,11 +1559,11 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
         <div className="sc-dt-row" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
           <div className="sc-dt-field" style={{ flex: "1 1 150px" }}>
             <label style={S.fieldLabel}>Date</label>
-            <input type="date" style={{ ...S.input, width: "100%", colorScheme: darkMode ? "dark" : "light" }} value={date} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" style={{ ...S.input, width: "100%", colorScheme: darkMode ? "dark" : "light", textAlign: "left" }} value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
           <div className="sc-dt-field" style={{ flex: "1 1 100px" }}>
             <label style={S.fieldLabel}>Start</label>
-            <input type="time" style={{ ...S.input, width: "100%" }} value={time} onChange={(e) => setTime(e.target.value)} />
+            <input type="time" style={{ ...S.input, width: "100%", textAlign: "left" }} value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
           <div className="sc-dt-field" style={{ flex: "1 1 90px" }}>
             <label style={S.fieldLabel}>Duration (min)</label>
