@@ -367,7 +367,10 @@ export default function SalahCalendar({ user, onLogout }) {
           .sc-topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 12px !important; }
           .sc-legend { justify-content: flex-start; max-width: 100% !important; gap: 10px !important; }
           .sc-modal { width: auto !important; max-width: calc(100vw - 32px); }
-          .sc-drawer { width: 100vw !important; max-width: 100vw; }
+          .sc-dt-row { flex-direction: column !important; flex-wrap: nowrap !important; }
+          .sc-dt-field { flex: 1 1 auto !important; width: 100% !important; }
+          .sc-drawer { width: 100vw !important; max-width: 100vw; overflow-x: hidden !important; }
+          .sc-settings-row { flex-wrap: wrap !important; row-gap: 6px !important; }
           .sc-week-outer { -webkit-overflow-scrolling: touch; }
           .sc-ring-wrap { flex-direction: column !important; gap: 14px !important; padding: 14px !important; }
           .sc-ring-canvas { width: min(420px, 90vw); height: min(420px, 90vw); }
@@ -556,6 +559,7 @@ export default function SalahCalendar({ user, onLogout }) {
               lastNotes={lastNotes}
               setLastNotes={setLastNotes}
               use24h={use24h}
+              isMobile={isMobile}
             />
           )}
           {view === "day" && (
@@ -571,6 +575,7 @@ export default function SalahCalendar({ user, onLogout }) {
               lastNotes={lastNotes}
               setLastNotes={setLastNotes}
               use24h={use24h}
+              isMobile={isMobile}
             />
           )}
         </div>
@@ -588,7 +593,7 @@ export default function SalahCalendar({ user, onLogout }) {
             {user && (
               <>
                 <div style={S.sectionLabel}>Account</div>
-                <div style={{ ...S.settingsRow, justifyContent: "space-between" }}>
+                <div className="sc-settings-row" style={{ ...S.settingsRow, justifyContent: "space-between" }}>
                   <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name || user.email}</span>
                     <span style={{ fontSize: 11, color: "#8a8a86" }}>{user.email}</span>
@@ -629,9 +634,9 @@ export default function SalahCalendar({ user, onLogout }) {
               )}
               {locStatus === "error" && <div style={S.statusErr}>Couldn't get your location. Check your browser's location permission and try again.</div>}
 
-              <div style={S.settingsRow}>
+              <div className="sc-settings-row" style={S.settingsRow}>
                 <div style={S.settingsLabel}>Method</div>
-                <select style={{ ...S.input, marginLeft: "auto" }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
+                <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
                   {CALC_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
@@ -644,7 +649,7 @@ export default function SalahCalendar({ user, onLogout }) {
             <div style={S.sectionLabel}>Manual times {locationMode !== "manual" ? "(fallback)" : ""} and window length</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {SALAH_ORDER.map((key) => (
-                <div key={key} style={S.settingsRow}>
+                <div key={key} className="sc-settings-row" style={S.settingsRow}>
                   <div style={S.settingsLabel}>{SALAH_LABEL[key]}</div>
                   <input type="time" value={salahTimes[key]} onChange={(e) => setSalahTimes((s) => ({ ...s, [key]: e.target.value }))} style={{ ...S.timeInput, colorScheme: darkMode ? "dark" : "light" }} />
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
@@ -658,7 +663,7 @@ export default function SalahCalendar({ user, onLogout }) {
                   </div>
                 </div>
               ))}
-              <div style={S.settingsRow}>
+              <div className="sc-settings-row" style={S.settingsRow}>
                 <div style={S.settingsLabel}>Sunrise</div>
                 <input
                   type="time"
@@ -848,7 +853,7 @@ function MonthView({ cursor, tasks, onPickDay, onAddOnDay, use24h }) {
 // ============================================================
 // Timeline view (Day = 1 column, Week = 7 columns) with salah reflow
 // ============================================================
-function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, onEditTask, onViewSalah, onAddAt, onPickDate, lastNotes, setLastNotes, use24h }) {
+function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, onEditTask, onViewSalah, onAddAt, onPickDate, lastNotes, setLastNotes, use24h, isMobile }) {
   const fmtT = use24h ? fmt24 : fmt12;
   const isSingleDay = dates.length === 1;
   const colRefs = useRef({});
@@ -955,16 +960,20 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
         </div>
       )}
 
-      <div className="sc-week-outer" style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch" }}>
+      <div className="sc-week-outer" style={{ flex: 1, minHeight: 0, overflowX: isMobile ? "hidden" : "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch" }}>
       <div
-        style={{ display: "flex", flexDirection: "column", height: "100%", minWidth: `calc(var(--week-timecol-w) + ${dates.length} * var(--week-daycol-w))` }}
+        style={{
+          display: "flex", flexDirection: "column", height: "100%",
+          minWidth: isMobile ? "100%" : `calc(var(--week-timecol-w) + ${dates.length} * var(--week-daycol-w))`,
+          width: isMobile ? "100%" : undefined,
+        }}
       >
         <div style={S.weekGridHead}>
           <div style={S.weekTimeCol} />
           {dates.map((d) => (
             <div
               key={dateKey(d)}
-              style={S.weekDayHead}
+              style={{ ...S.weekDayHead, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}) }}
               className={!isSingleDay ? "sc-cell" : undefined}
               onClick={!isSingleDay ? () => onPickDate(d) : undefined}
             >
@@ -978,7 +987,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
           <div style={{ position: "relative", height: trackHeight, display: "flex" }}>
             <div style={{ ...S.weekTimeCol, position: "relative" }}>
               {hourMarks.map((m) => (
-                <span key={m} style={{ ...S.hourLabel, top: (m - DAY_START) * PX_PER_MIN - 6 }}>{fmtT(m)}</span>
+                <span key={m} style={{ ...S.hourLabel, top: Math.max(0, (m - DAY_START) * PX_PER_MIN - 6) }}>{fmtT(m)}</span>
               ))}
             </div>
 
@@ -988,7 +997,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
               <div
                 key={colKey}
                 ref={(el) => { colRefs.current[colKey] = el; }}
-                style={{ ...S.dayCol, cursor: "pointer" }}
+                style={{ ...S.dayCol, ...(isMobile ? { minWidth: 0, flexBasis: 0 } : {}), cursor: "pointer" }}
                 onPointerDown={(e) => {
                   if (!e.isPrimary) return;
                   if (e.target !== e.currentTarget) return;
@@ -1545,16 +1554,16 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
         <label style={S.fieldLabel}>Title</label>
         <input style={S.input} autoFocus={typeof window !== "undefined" && window.innerWidth > 860} placeholder="Name this event" value={title} onChange={(e) => setTitle(e.target.value)} />
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
-          <div style={{ flex: "1 1 150px" }}>
+        <div className="sc-dt-row" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+          <div className="sc-dt-field" style={{ flex: "1 1 150px" }}>
             <label style={S.fieldLabel}>Date</label>
-            <input type="date" style={{ ...S.input, colorScheme: darkMode ? "dark" : "light" }} value={date} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" style={{ ...S.input, width: "100%", colorScheme: darkMode ? "dark" : "light" }} value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
-          <div style={{ flex: "1 1 100px" }}>
+          <div className="sc-dt-field" style={{ flex: "1 1 100px" }}>
             <label style={S.fieldLabel}>Start</label>
             <input type="time" style={{ ...S.input, width: "100%" }} value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
-          <div style={{ flex: "1 1 90px" }}>
+          <div className="sc-dt-field" style={{ flex: "1 1 90px" }}>
             <label style={S.fieldLabel}>Duration (min)</label>
             <input type="number" min={5} style={{ ...S.input, width: "100%" }} value={dur} onChange={(e) => setDur(e.target.value)} />
           </div>
@@ -1885,7 +1894,7 @@ const S = {
     border: `1px solid ${BLACK}`, borderRadius: 4, padding: "1px 6px", overflow: "hidden",
     display: "flex", alignItems: "center",
   },
-  salahName: { fontSize: 10, fontWeight: 500, color: BLACK, lineHeight: 1.1, whiteSpace: "nowrap" },
+  salahName: { fontSize: 10, fontWeight: 500, color: BLACK, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block", maxWidth: "100%" },
   taskBlock: {
     position: "absolute", left: 3, right: 3, background: WHITE,
     border: `1px solid ${HAIRLINE}`, borderRadius: 5,
@@ -1897,7 +1906,7 @@ const S = {
 
   // settings drawer
   drawerOverlay: { position: "absolute", inset: 0, background: "rgba(17,17,17,0.06)", display: "flex", justifyContent: "flex-end", zIndex: 20 },
-  drawer: { width: 340, background: WHITE, borderLeft: `1px solid ${HAIRLINE}`, padding: 18, overflowY: "auto" },
+  drawer: { width: 340, background: WHITE, borderLeft: `1px solid ${HAIRLINE}`, padding: 18, overflowY: "auto", overflowX: "hidden", boxSizing: "border-box" },
   drawerHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   drawerTitle: { fontSize: 15, fontWeight: 600 },
   sectionLabel: { fontSize: 11, fontWeight: 600, color: GRAY_TEXT, textTransform: "uppercase", letterSpacing: 0.4, margin: "16px 0 8px" },
@@ -1913,7 +1922,7 @@ const S = {
   statusErr: { fontSize: 11.5, color: GRAY_TEXT, marginBottom: 8 },
   settingsRow: { display: "flex", alignItems: "center", gap: 8, border: `1px solid ${HAIRLINE}`, borderRadius: 6, padding: "6px 8px" },
   settingsLabel: { fontSize: 12.5, fontWeight: 500, width: 56, flexShrink: 0 },
-  timeInput: { border: `1px solid ${HAIRLINE}`, borderRadius: 5, padding: "4px 6px", fontSize: 12 },
+  timeInput: { border: `1px solid ${HAIRLINE}`, borderRadius: 5, padding: "4px 6px", fontSize: 12, width: 92, flexShrink: 0 },
   numInput: { width: 46, border: `1px solid ${HAIRLINE}`, borderRadius: 5, padding: "4px 5px", fontSize: 12 },
   durUnit: { fontSize: 11, color: GRAY_TEXT },
 
