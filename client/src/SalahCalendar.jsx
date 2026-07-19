@@ -366,11 +366,12 @@ export default function SalahCalendar({ user, onLogout }) {
         .sc-ring-canvas { width: min(500px, 88vw); height: min(500px, 88vw); }
 
         @media (max-width: 860px) {
+          input, select, textarea { font-size: 16px !important; }
           .sc-topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 12px !important; }
           .sc-legend { justify-content: flex-start; max-width: 100% !important; gap: 10px !important; }
           .sc-modal { width: auto !important; max-width: calc(100vw - 32px); }
           .sc-dt-row { flex-direction: column !important; flex-wrap: nowrap !important; }
-          .sc-dt-field { flex: 1 1 auto !important; width: 100% !important; max-width: 260px !important; }
+          .sc-dt-field { flex: 1 1 auto !important; width: 100% !important; }
           .sc-drawer { width: 100vw !important; max-width: 100vw; overflow-x: hidden !important; }
           .sc-settings-row { flex-wrap: wrap !important; row-gap: 6px !important; }
           .sc-week-outer { -webkit-overflow-scrolling: touch; }
@@ -983,6 +984,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
               <div style={{ ...S.weekDayNum, ...(sameDay(d, new Date()) ? S.weekDayNumToday : {}) }}>{d.getDate()}</div>
             </div>
           ))}
+          {isMobile && <div style={{ width: 10, flexShrink: 0 }} />}
         </div>
 
         <div style={S.weekScroll} className="sc-scroll">
@@ -1149,6 +1151,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
               </div>
             );
           })}
+          {isMobile && <div style={{ width: 10, flexShrink: 0 }} />}
 
           {/* Day view only: scaling brackets in a single margin on the right side
               of the calendar (clear of the time labels on the left) tracing
