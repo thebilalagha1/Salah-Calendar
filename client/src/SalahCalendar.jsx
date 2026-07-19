@@ -1424,9 +1424,16 @@ function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, proh
   }, []);
 
   const dayTasksRaw = useMemo(() => instancesForDate(tasks, cursor), [JSON.stringify(tasks), dateKey(cursor)]);
-  const blocks = useMemo(() => salahBlocksForDate(cursor), [dateKey(cursor)]);
-  const windows = useMemo(() => salahWindowsForDate(cursor), [dateKey(cursor)]);
-  const prohibited = useMemo(() => prohibitedWindowsForDate(cursor), [dateKey(cursor)]);
+  // NOTE: these must react to more than just the date — switching religion
+  // (or the manual times/durations/live-fetched data these functions close
+  // over) doesn't change dateKey(cursor), so a memo keyed on the date alone
+  // goes stale and keeps showing the old religion until something else
+  // forces a remount. Depend on the actual computed output, same as
+  // DayView's dayData memo does, so it invalidates whenever the real data
+  // does.
+  const blocks = useMemo(() => salahBlocksForDate(cursor), [dateKey(cursor), religion, JSON.stringify(salahBlocksForDate(cursor))]);
+  const windows = useMemo(() => salahWindowsForDate(cursor), [dateKey(cursor), religion, JSON.stringify(salahWindowsForDate(cursor))]);
+  const prohibited = useMemo(() => prohibitedWindowsForDate(cursor), [dateKey(cursor), religion, JSON.stringify(prohibitedWindowsForDate(cursor))]);
   const { tasks: dayTasks } = useMemo(() => reflow(dayTasksRaw, blocks), [JSON.stringify(dayTasksRaw), JSON.stringify(blocks)]);
 
   const size = 500;
