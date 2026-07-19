@@ -10,6 +10,8 @@ import {
 } from "./engine.js";
 
 import { API_BASE_URL } from "./config.js";
+import qamuWordmark from "./assets/qamu-wordmark.png";
+import qamuIcon from "./assets/qamu-icon.png";
 
 const PX_PER_MIN = 1.1;
 
@@ -68,6 +70,7 @@ const Icon = {
   X: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M18 6L6 18M6 6l12 12"/></svg>,
   Clock: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,
   Ring: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/></svg>,
+  Menu: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/></svg>,
 };
 
 // ---------- main ----------
@@ -86,6 +89,7 @@ export default function SalahCalendar({ user, onLogout }) {
   const [darkMode, setDarkMode] = useState(false);
   const [use24h, setUse24h] = useState(false);
   const [storageLoaded, setStorageLoaded] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth > 720 : true));
 
   // ---- AlAdhan integration ----
   // timesByDate caches real per-day prayer times fetched from AlAdhan, keyed by dateKey.
@@ -336,6 +340,38 @@ export default function SalahCalendar({ user, onLogout }) {
         input, select, textarea { font-family: 'Inter', sans-serif; }
         input[type="time"]::-webkit-calendar-picker-indicator, input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
 
+        /* sidebar backdrop: on wide screens the sidebar just floats on top of
+           the calendar with no scrim and no click-blocking, so toggling it
+           feels like a shortcut, not a modal. On narrow screens it dims the
+           rest of the app and taps outside close the panel, since there's no
+           room for both to be visible/usable at once. */
+        .sc-sidebar-backdrop {
+          position: absolute; inset: 0; z-index: 24;
+          background: transparent; pointer-events: none;
+        }
+
+        @media (max-width: 720px) {
+          .sc-sidebar-backdrop {
+            background: rgba(17,17,17,0.28);
+            pointer-events: auto;
+          }
+          /* full-bleed app shell — no card chrome, fill the real viewport
+             (dvh accounts for mobile browser chrome showing/hiding) */
+          .sc-app {
+            border-radius: 0 !important;
+            border: none !important;
+            height: 100dvh !important;
+            min-height: 100dvh !important;
+            max-width: 100% !important;
+          }
+          .sc-sidebar { width: min(78vw, 260px) !important; }
+          .sc-topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 12px !important; }
+          .sc-legend { justify-content: flex-start; max-width: 100% !important; gap: 10px !important; }
+          .sc-modal { width: auto !important; max-width: calc(100vw - 32px); }
+          .sc-drawer { width: 100vw !important; max-width: 100vw; }
+          .sc-week-scroll { overflow-x: auto; }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
             animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
@@ -344,8 +380,26 @@ export default function SalahCalendar({ user, onLogout }) {
         }
       `}</style>
 
+      {/* backdrop — closes the sidebar on small screens when tapped; inert/invisible on wide screens via CSS */}
+      {sidebarOpen && <div className="sc-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {/* ---------- sidebar ---------- */}
-      <div style={S.sidebar}>
+      <div
+        className="sc-sidebar"
+        style={{ ...S.sidebar, transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)" }}
+      >
+        <div style={S.brand}>
+          <img src={qamuWordmark} alt="QAMU" style={S.brandLockup} />
+          <button
+            className="sc-btn sc-icon-btn sc-close-btn"
+            style={{ ...S.iconOnlyBtn, marginLeft: "auto", flexShrink: 0 }}
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close panel"
+          >
+            <Icon.X width={15} height={15} />
+          </button>
+        </div>
+
         <div style={S.navGroup}>
           {[
             ["ring", "Ring", Icon.Ring],
@@ -358,7 +412,10 @@ export default function SalahCalendar({ user, onLogout }) {
               key={key}
               className={`sc-btn sc-nav-btn ${view === key ? "sc-nav-active" : ""}`}
               style={{ ...S.navBtn, ...(view === key ? S.navBtnActive : {}) }}
-              onClick={() => setView(key)}
+              onClick={() => {
+                setView(key);
+                if (typeof window !== "undefined" && window.innerWidth <= 720) setSidebarOpen(false);
+              }}
             >
               <IconC width={15} height={15} />
               {label}
@@ -366,7 +423,14 @@ export default function SalahCalendar({ user, onLogout }) {
           ))}
         </div>
 
-        <button className="sc-btn sc-nav-btn" style={S.navBtn} onClick={() => setShowSettings((v) => !v)}>
+        <button
+          className="sc-btn sc-nav-btn"
+          style={S.navBtn}
+          onClick={() => {
+            setShowSettings((v) => !v);
+            if (typeof window !== "undefined" && window.innerWidth <= 720) setSidebarOpen(false);
+          }}
+        >
           <Icon.Settings width={15} height={15} />
           Settings
         </button>
@@ -374,7 +438,10 @@ export default function SalahCalendar({ user, onLogout }) {
         <button
           className="sc-btn sc-primary-btn"
           style={{ ...S.navBtn, marginTop: "auto", border: "1px solid var(--ink)", justifyContent: "center" }}
-          onClick={() => setModal({ date: cursor })}
+          onClick={() => {
+            setModal({ date: cursor });
+            if (typeof window !== "undefined" && window.innerWidth <= 720) setSidebarOpen(false);
+          }}
         >
           <Icon.Plus width={14} height={14} />
           New event
@@ -383,8 +450,18 @@ export default function SalahCalendar({ user, onLogout }) {
 
       {/* ---------- main ---------- */}
       <div style={S.main}>
-        <div style={S.topbar}>
+        <div style={S.topbar} className="sc-topbar">
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              className="sc-btn sc-icon-btn"
+              style={S.iconOnlyBtn}
+              onClick={() => setSidebarOpen((v) => !v)}
+              aria-label={sidebarOpen ? "Hide panel" : "Show panel"}
+              title={sidebarOpen ? "Hide panel" : "Show panel"}
+            >
+              <Icon.Menu width={16} height={16} />
+            </button>
+            {!sidebarOpen && <img src={qamuIcon} alt="" style={S.topbarMark} />}
             <button className="sc-btn sc-icon-btn sc-chev-left" style={S.iconOnlyBtn} onClick={() => nav(-1)} aria-label="Previous"><Icon.ChevL width={16} height={16} /></button>
             <button className="sc-btn sc-icon-btn sc-chev-right" style={S.iconOnlyBtn} onClick={() => nav(1)} aria-label="Next"><Icon.ChevR width={16} height={16} /></button>
             <div style={S.periodLabel}>
@@ -404,7 +481,7 @@ export default function SalahCalendar({ user, onLogout }) {
               {darkMode ? <Icon.Sun width={15} height={15} /> : <Icon.Moon width={15} height={15} />}
             </button>
           </div>
-          <div style={S.legend}>
+          <div style={S.legend} className="sc-legend">
             <span style={S.legendItem} title={`The prayer's exact time block, colored per salah — ${SALAH_ORDER.map((k) => SALAH_LABEL[k]).join(", ")}`}>
               <i style={S.legendSwatchSalah} />Salah
             </span>
@@ -489,7 +566,7 @@ export default function SalahCalendar({ user, onLogout }) {
       {/* ---------- settings drawer ---------- */}
       {showSettings && (
         <div style={S.drawerOverlay} className="sc-overlay-fade" onClick={() => setShowSettings(false)}>
-          <div style={S.drawer} onClick={(e) => e.stopPropagation()} className="sc-drawer-slide">
+          <div style={S.drawer} onClick={(e) => e.stopPropagation()} className="sc-drawer-slide sc-drawer">
             <div style={S.drawerHead}>
               <div style={S.drawerTitle}>Settings</div>
               <button className="sc-btn sc-icon-btn sc-close-btn" style={S.iconOnlyBtn} onClick={() => setShowSettings(false)}><Icon.X width={16} height={16} /></button>
@@ -862,28 +939,32 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
         </div>
       )}
 
-      <div style={S.weekGridHead}>
-        <div style={S.weekTimeCol} />
-        {dates.map((d) => (
-          <div
-            key={dateKey(d)}
-            style={S.weekDayHead}
-            className={!isSingleDay ? "sc-cell" : undefined}
-            onClick={!isSingleDay ? () => onPickDate(d) : undefined}
-          >
-            <div style={S.weekDayName}>{isSingleDay ? WEEKDAYS[d.getDay()].toUpperCase() : WEEKDAYS[d.getDay()]}</div>
-            <div style={{ ...S.weekDayNum, ...(sameDay(d, new Date()) ? S.weekDayNumToday : {}) }}>{d.getDate()}</div>
-          </div>
-        ))}
-      </div>
+      <div
+        className="sc-week-scroll"
+        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 56 + dates.length * 110 }}
+      >
+        <div style={S.weekGridHead}>
+          <div style={S.weekTimeCol} />
+          {dates.map((d) => (
+            <div
+              key={dateKey(d)}
+              style={S.weekDayHead}
+              className={!isSingleDay ? "sc-cell" : undefined}
+              onClick={!isSingleDay ? () => onPickDate(d) : undefined}
+            >
+              <div style={S.weekDayName}>{isSingleDay ? WEEKDAYS[d.getDay()].toUpperCase() : WEEKDAYS[d.getDay()]}</div>
+              <div style={{ ...S.weekDayNum, ...(sameDay(d, new Date()) ? S.weekDayNumToday : {}) }}>{d.getDate()}</div>
+            </div>
+          ))}
+        </div>
 
-      <div style={S.weekScroll} className="sc-scroll">
-        <div style={{ position: "relative", height: trackHeight, display: "flex" }}>
-          <div style={{ ...S.weekTimeCol, position: "relative" }}>
-            {hourMarks.map((m) => (
-              <span key={m} style={{ ...S.hourLabel, top: (m - DAY_START) * PX_PER_MIN - 6 }}>{fmtT(m)}</span>
-            ))}
-          </div>
+        <div style={S.weekScroll} className="sc-scroll">
+          <div style={{ position: "relative", height: trackHeight, display: "flex" }}>
+            <div style={{ ...S.weekTimeCol, position: "relative" }}>
+              {hourMarks.map((m) => (
+                <span key={m} style={{ ...S.hourLabel, top: (m - DAY_START) * PX_PER_MIN - 6 }}>{fmtT(m)}</span>
+              ))}
+            </div>
 
           {dayData.map(({ date, tasks: dayTasks, blocks, windows, prohibited }) => {
             const colKey = dateKey(date);
@@ -1109,6 +1190,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
               </div>
             );
           })()}
+        </div>
         </div>
       </div>
     </div>
@@ -1419,7 +1501,7 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
 
   return (
     <div style={S.modalOverlay} className="sc-overlay-fade" onClick={onClose}>
-      <div style={S.modal} onClick={(e) => e.stopPropagation()} className="sc-fade sc-modal-pop">
+      <div style={S.modal} onClick={(e) => e.stopPropagation()} className="sc-fade sc-modal-pop sc-modal">
         <div style={S.modalHead}>
           <div style={S.modalTitle}>{editing ? "Edit event" : "New event"}</div>
           <button className="sc-btn sc-icon-btn sc-close-btn" style={S.iconOnlyBtn} onClick={onClose}><Icon.X width={16} height={16} /></button>
@@ -1541,7 +1623,7 @@ function SalahDetailModal({ data, onClose, use24h }) {
 
   return (
     <div style={S.modalOverlay} className="sc-overlay-fade" onClick={onClose}>
-      <div style={{ ...S.modal, width: 340 }} onClick={(e) => e.stopPropagation()} className="sc-fade sc-modal-pop">
+      <div style={{ ...S.modal, width: 340 }} onClick={(e) => e.stopPropagation()} className="sc-fade sc-modal-pop sc-modal">
         <div style={S.modalHead}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <i style={{ width: 11, height: 11, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
@@ -1626,6 +1708,7 @@ function salahBandsCss() {
 
 const S = {
   app: {
+    position: "relative",
     display: "flex",
     fontFamily: "'Inter', -apple-system, sans-serif",
     background: WHITE,
@@ -1640,17 +1723,27 @@ const S = {
     margin: "0 auto",
   },
   sidebar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    zIndex: 25,
     width: 190,
     borderRight: `1px solid ${HAIRLINE}`,
+    background: WHITE,
     padding: "16px 10px",
     display: "flex",
     flexDirection: "column",
     gap: 2,
     flexShrink: 0,
+    transition: "transform 260ms cubic-bezier(.22,1,.36,1)",
+    boxShadow: "2px 0 18px rgba(0,0,0,0.08)",
   },
-  brand: { display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 16px" },
+  brand: { display: "flex", alignItems: "center", gap: 8, padding: "4px 4px 16px 6px" },
+  brandLockup: { height: 22, width: "auto", display: "block" },
   brandTitle: { fontSize: 13.5, fontWeight: 600, lineHeight: 1.2 },
   brandSub: { fontSize: 11, color: GRAY_TEXT },
+  topbarMark: { height: 20, width: "auto", display: "block", marginRight: 2 },
   navGroup: { display: "flex", flexDirection: "column", gap: 1, marginBottom: 8 },
   navBtn: {
     display: "flex", alignItems: "center", gap: 8,
@@ -1728,11 +1821,11 @@ const S = {
   reasonBar: { fontSize: 12, padding: "8px 18px", borderBottom: `1px solid ${HAIRLINE}`, background: SUBTLE_BG, color: BLACK, flexShrink: 0 },
   weekGridHead: { display: "flex", borderBottom: `1px solid ${HAIRLINE}`, flexShrink: 0 },
   weekTimeCol: { width: 56, flexShrink: 0 },
-  weekDayHead: { flex: 1, textAlign: "center", padding: "8px 0" },
+  weekDayHead: { flex: 1, minWidth: 110, textAlign: "center", padding: "8px 0" },
   weekDayName: { fontSize: 10.5, color: GRAY_TEXT, textTransform: "uppercase", letterSpacing: 0.3 },
   weekDayNum: { fontSize: 15, fontWeight: 500, marginTop: 2, display: "inline-flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   weekDayNumToday: { background: ACCENT, color: ACCENT_TEXT },
-  weekScroll: { flex: 1, overflowY: "auto", overflowX: "auto" },
+  weekScroll: { flex: 1, overflowY: "auto", overflowX: "hidden" },
   hourLabel: { position: "absolute", left: 0, fontSize: 10, color: GRAY_TEXT },
   dayCol: { flex: 1, minWidth: 110, position: "relative", borderLeft: `1px solid ${HAIRLINE}` },
   hourLine: { position: "absolute", left: 0, right: 0, borderTop: `1px solid ${HAIRLINE}` },
