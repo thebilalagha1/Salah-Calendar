@@ -266,7 +266,7 @@ export default function SalahCalendar({ user, onLogout }) {
           --week-daycol-w: 110px;
         }
         @media (max-width: 860px) {
-          .sc-app { --week-timecol-w: 44px; --week-daycol-w: 76px; }
+          .sc-app { --week-timecol-w: 50px; --week-daycol-w: 76px; }
         }
         .sc-scroll::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
 
@@ -368,7 +368,7 @@ export default function SalahCalendar({ user, onLogout }) {
           .sc-legend { justify-content: flex-start; max-width: 100% !important; gap: 10px !important; }
           .sc-modal { width: auto !important; max-width: calc(100vw - 32px); }
           .sc-dt-row { flex-direction: column !important; flex-wrap: nowrap !important; }
-          .sc-dt-field { flex: 1 1 auto !important; width: 100% !important; }
+          .sc-dt-field { flex: 1 1 auto !important; width: 100% !important; max-width: 260px !important; }
           .sc-drawer { width: 100vw !important; max-width: 100vw; overflow-x: hidden !important; }
           .sc-settings-row { flex-wrap: wrap !important; row-gap: 6px !important; }
           .sc-week-outer { -webkit-overflow-scrolling: touch; }
@@ -1886,7 +1886,7 @@ const S = {
   weekDayNum: { fontSize: 15, fontWeight: 500, marginTop: 2, display: "inline-flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   weekDayNumToday: { background: ACCENT, color: ACCENT_TEXT },
   weekScroll: { flex: 1, overflowY: "auto", overflowX: "visible" },
-  hourLabel: { position: "absolute", left: 0, fontSize: 10, color: GRAY_TEXT },
+  hourLabel: { position: "absolute", left: 6, fontSize: 10, color: GRAY_TEXT },
   dayCol: { flex: 1, minWidth: "var(--week-daycol-w)", position: "relative", borderLeft: `1px solid ${HAIRLINE}`, touchAction: "none" },
   hourLine: { position: "absolute", left: 0, right: 0, borderTop: `1px solid ${HAIRLINE}` },
   salahBlock: {
