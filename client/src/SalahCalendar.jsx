@@ -89,7 +89,14 @@ export default function SalahCalendar({ user, onLogout }) {
   const [darkMode, setDarkMode] = useState(false);
   const [use24h, setUse24h] = useState(false);
   const [storageLoaded, setStorageLoaded] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth > 720 : true));
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth > 860 : true));
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 860 : false));
+
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth <= 860); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // ---- AlAdhan integration ----
   // timesByDate caches real per-day prayer times fetched from AlAdhan, keyed by dateKey.
@@ -253,6 +260,7 @@ export default function SalahCalendar({ user, onLogout }) {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
+        html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
         .sc-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .sc-scroll::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
 
@@ -340,36 +348,26 @@ export default function SalahCalendar({ user, onLogout }) {
         input, select, textarea { font-family: 'Inter', sans-serif; }
         input[type="time"]::-webkit-calendar-picker-indicator, input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
 
-        /* sidebar backdrop: on wide screens the sidebar just floats on top of
-           the calendar with no scrim and no click-blocking, so toggling it
-           feels like a shortcut, not a modal. On narrow screens it dims the
-           rest of the app and taps outside close the panel, since there's no
-           room for both to be visible/usable at once. */
+        /* only rendered at all when isMobile (see JSX) — dims the calendar
+           behind the overlaid sidebar and closes it on tap */
         .sc-sidebar-backdrop {
-          position: absolute; inset: 0; z-index: 24;
-          background: transparent; pointer-events: none;
+          position: fixed; inset: 0; z-index: 39;
+          background: rgba(17,17,17,0.32);
         }
 
-        @media (max-width: 720px) {
-          .sc-sidebar-backdrop {
-            background: rgba(17,17,17,0.28);
-            pointer-events: auto;
-          }
-          /* full-bleed app shell — no card chrome, fill the real viewport
-             (dvh accounts for mobile browser chrome showing/hiding) */
-          .sc-app {
-            border-radius: 0 !important;
-            border: none !important;
-            height: 100dvh !important;
-            min-height: 100dvh !important;
-            max-width: 100% !important;
-          }
-          .sc-sidebar { width: min(78vw, 260px) !important; }
+        .sc-ring-canvas { width: min(500px, 88vw); height: min(500px, 88vw); }
+
+        @media (max-width: 860px) {
           .sc-topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 12px !important; }
           .sc-legend { justify-content: flex-start; max-width: 100% !important; gap: 10px !important; }
           .sc-modal { width: auto !important; max-width: calc(100vw - 32px); }
           .sc-drawer { width: 100vw !important; max-width: 100vw; }
           .sc-week-scroll { overflow-x: auto; }
+          .sc-ring-wrap { flex-direction: column !important; gap: 14px !important; padding: 14px !important; }
+          .sc-ring-canvas { width: min(420px, 90vw); height: min(420px, 90vw); }
+          .sc-month-day-num { font-size: 11px !important; width: 18px !important; height: 18px !important; }
+          .sc-month-cell { padding: 4px !important; }
+          .sc-month-event { font-size: 10px !important; padding: 1px 4px !important; }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -380,72 +378,81 @@ export default function SalahCalendar({ user, onLogout }) {
         }
       `}</style>
 
-      {/* backdrop — closes the sidebar on small screens when tapped; inert/invisible on wide screens via CSS */}
-      {sidebarOpen && <div className="sc-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+      {/* backdrop — only exists on narrow screens, where the sidebar has to
+          overlay the calendar instead of pushing it (no room for both).
+          Tapping it closes the panel. On wide screens the sidebar pushes the
+          main content over instead, so there's nothing to dim or block. */}
+      {isMobile && sidebarOpen && <div className="sc-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
       {/* ---------- sidebar ---------- */}
       <div
         className="sc-sidebar"
-        style={{ ...S.sidebar, transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)" }}
+        style={
+          isMobile
+            ? { ...S.sidebar, ...S.sidebarMobile, transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)" }
+            : { ...S.sidebar, width: sidebarOpen ? 210 : 0, borderRightWidth: sidebarOpen ? 1 : 0 }
+        }
       >
-        <div style={S.brand}>
-          <img src={qamuWordmark} alt="QAMU" style={S.brandLockup} />
+        <div style={S.sidebarInner}>
+          <div style={S.brand}>
+            <img src={qamuWordmark} alt="QAMU" style={S.brandLockup} />
+            <button
+              className="sc-btn sc-icon-btn sc-close-btn"
+              style={{ ...S.iconOnlyBtn, marginLeft: "auto", flexShrink: 0 }}
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close panel"
+            >
+              <Icon.X width={15} height={15} />
+            </button>
+          </div>
+
+          <div style={S.navGroup}>
+            {[
+              ["ring", "Ring", Icon.Ring],
+              ["day", "Day", Icon.Day],
+              ["week", "Week", Icon.Week],
+              ["month", "Month", Icon.Month],
+              ["year", "Year", Icon.Year],
+            ].map(([key, label, IconC]) => (
+              <button
+                key={key}
+                className={`sc-btn sc-nav-btn ${view === key ? "sc-nav-active" : ""}`}
+                style={{ ...S.navBtn, ...(view === key ? S.navBtnActive : {}) }}
+                onClick={() => {
+                  setView(key);
+                  if (isMobile) setSidebarOpen(false);
+                }}
+              >
+                <IconC width={15} height={15} />
+                {label}
+              </button>
+            ))}
+          </div>
+
           <button
-            className="sc-btn sc-icon-btn sc-close-btn"
-            style={{ ...S.iconOnlyBtn, marginLeft: "auto", flexShrink: 0 }}
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Close panel"
+            className="sc-btn sc-nav-btn"
+            style={S.navBtn}
+            onClick={() => {
+              setShowSettings((v) => !v);
+              if (isMobile) setSidebarOpen(false);
+            }}
           >
-            <Icon.X width={15} height={15} />
+            <Icon.Settings width={15} height={15} />
+            Settings
+          </button>
+
+          <button
+            className="sc-btn sc-primary-btn"
+            style={{ ...S.navBtn, marginTop: "auto", border: "1px solid var(--ink)", justifyContent: "center" }}
+            onClick={() => {
+              setModal({ date: cursor });
+              if (isMobile) setSidebarOpen(false);
+            }}
+          >
+            <Icon.Plus width={14} height={14} />
+            New event
           </button>
         </div>
-
-        <div style={S.navGroup}>
-          {[
-            ["ring", "Ring", Icon.Ring],
-            ["day", "Day", Icon.Day],
-            ["week", "Week", Icon.Week],
-            ["month", "Month", Icon.Month],
-            ["year", "Year", Icon.Year],
-          ].map(([key, label, IconC]) => (
-            <button
-              key={key}
-              className={`sc-btn sc-nav-btn ${view === key ? "sc-nav-active" : ""}`}
-              style={{ ...S.navBtn, ...(view === key ? S.navBtnActive : {}) }}
-              onClick={() => {
-                setView(key);
-                if (typeof window !== "undefined" && window.innerWidth <= 720) setSidebarOpen(false);
-              }}
-            >
-              <IconC width={15} height={15} />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <button
-          className="sc-btn sc-nav-btn"
-          style={S.navBtn}
-          onClick={() => {
-            setShowSettings((v) => !v);
-            if (typeof window !== "undefined" && window.innerWidth <= 720) setSidebarOpen(false);
-          }}
-        >
-          <Icon.Settings width={15} height={15} />
-          Settings
-        </button>
-
-        <button
-          className="sc-btn sc-primary-btn"
-          style={{ ...S.navBtn, marginTop: "auto", border: "1px solid var(--ink)", justifyContent: "center" }}
-          onClick={() => {
-            setModal({ date: cursor });
-            if (typeof window !== "undefined" && window.innerWidth <= 720) setSidebarOpen(false);
-          }}
-        >
-          <Icon.Plus width={14} height={14} />
-          New event
-        </button>
       </div>
 
       {/* ---------- main ---------- */}
@@ -794,9 +801,9 @@ function MonthView({ cursor, tasks, onPickDay, onAddOnDay, use24h }) {
           const isToday = sameDay(date, new Date());
           const dayEvents = tasks.filter((t) => occursOnDate(t, date)).sort((a, b) => a.start - b.start);
           return (
-            <div key={i} className="sc-cell" style={S.monthCell} onClick={() => onPickDay(date)}>
+            <div key={i} className="sc-cell sc-month-cell" style={S.monthCell} onClick={() => onPickDay(date)}>
               <div style={S.monthCellHead}>
-                <span style={{ ...S.monthDayNum, ...(isToday ? S.monthDayNumToday : {}) }}>{date.getDate()}</span>
+                <span className="sc-month-day-num" style={{ ...S.monthDayNum, ...(isToday ? S.monthDayNumToday : {}) }}>{date.getDate()}</span>
                 <button
                   className="sc-btn"
                   style={S.monthAddBtn}
@@ -810,6 +817,7 @@ function MonthView({ cursor, tasks, onPickDay, onAddOnDay, use24h }) {
                 {dayEvents.slice(0, 3).map((t) => (
                   <div
                     key={t.id}
+                    className="sc-month-event"
                     style={{
                       ...S.monthEventChip,
                       background: t.color || DEFAULT_EVENT_COLOR,
@@ -863,16 +871,18 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
       if (!d) return;
       let start = Math.min(d.startMin, d.curMin);
       let end = Math.max(d.startMin, d.curMin);
-      if (end - start < 15) end = start + 30; // plain click -> default 30-min event
+      if (end - start < 15) end = start + 30; // plain tap/click -> default 30-min event
       dragRef.current = null;
       setDragVisual(null);
       onAddAt(d.date, start, end - start);
     }
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
     return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onAddAt]);
@@ -973,19 +983,21 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
                 key={colKey}
                 ref={(el) => { colRefs.current[colKey] = el; }}
                 style={{ ...S.dayCol, cursor: "pointer" }}
-                onMouseDown={(e) => {
+                onPointerDown={(e) => {
+                  if (!e.isPrimary) return;
                   if (e.target !== e.currentTarget) return;
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
                   const m = minuteFromEvent(e, e.currentTarget);
                   dragRef.current = { key: colKey, date, startMin: m, curMin: m };
                   setDragVisual({ key: colKey, startMin: m, curMin: m });
                 }}
-                onMouseMove={(e) => {
+                onPointerMove={(e) => {
                   if (dragRef.current) return;
                   if (e.target !== e.currentTarget) { setHover((h) => (h && h.key === colKey ? null : h)); return; }
                   const m = minuteFromEvent(e, e.currentTarget);
                   setHover((h) => (h && h.key === colKey && h.min === m ? h : { key: colKey, min: m }));
                 }}
-                onMouseLeave={() => setHover((h) => (h && h.key === colKey ? null : h))}
+                onPointerLeave={() => setHover((h) => (h && h.key === colKey ? null : h))}
               >
                 {/* full salah windows (e.g. Fajr through sunrise), each in its own
                     color so adjacent windows never blend into one another */}
@@ -1249,8 +1261,8 @@ function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, proh
   ].sort((a, b) => a.start - b.start);
 
   return (
-    <div style={S.ringWrap}>
-      <div style={S.ringCanvasWrap}>
+    <div style={S.ringWrap} className="sc-ring-wrap">
+      <div style={S.ringCanvasWrap} className="sc-ring-canvas">
         <svg viewBox={`0 0 ${size} ${size}`} width="100%" height="100%" style={{ maxWidth: 540, maxHeight: 540 }}>
           {/* All minute->angle arcs (dasharray-based) are drawn by native SVG
               circles starting at 3 o'clock (0deg) sweeping clockwise, but every
@@ -1508,7 +1520,7 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
         </div>
 
         <label style={S.fieldLabel}>Title</label>
-        <input style={S.input} autoFocus placeholder="Name this event" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input style={S.input} autoFocus={typeof window !== "undefined" && window.innerWidth > 860} placeholder="Name this event" value={title} onChange={(e) => setTitle(e.target.value)} />
 
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <div style={{ flex: 1 }}>
@@ -1713,31 +1725,47 @@ const S = {
     fontFamily: "'Inter', -apple-system, sans-serif",
     background: WHITE,
     color: BLACK,
-    border: `1px solid ${HAIRLINE}`,
-    borderRadius: 8,
     overflow: "hidden",
-    height: "min(760px, 86vh)",
-    minHeight: 560,
-    width: "100%",
-    maxWidth: 1320,
-    margin: "0 auto",
+    height: "100dvh",
+    width: "100vw",
   },
   sidebar: {
-    position: "absolute",
+    position: "relative",
     top: 0,
-    left: 0,
     bottom: 0,
     zIndex: 25,
-    width: 190,
     borderRight: `1px solid ${HAIRLINE}`,
     background: WHITE,
+    flexShrink: 0,
+    overflow: "hidden",
+    transition: "width 260ms cubic-bezier(.22,1,.36,1), border-right-width 260ms ease",
+  },
+  // applied on top of `sidebar` only when isMobile — switches it from an
+  // in-flow panel that pushes the calendar over, to a fixed overlay that
+  // slides on top of it (there's no room to push on a small screen).
+  sidebarMobile: {
+    position: "fixed",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: "min(80vw, 280px)",
+    zIndex: 40,
+    transition: "transform 260ms cubic-bezier(.22,1,.36,1)",
+    boxShadow: "2px 0 18px rgba(0,0,0,0.18)",
+  },
+  // fixed-width content holder inside the sidebar — the outer `sidebar`
+  // element is what animates (width on desktop, transform on mobile); this
+  // inner div stays a constant width so the nav labels never wrap/reflow
+  // mid-animation, they just get clipped in and out by the outer overflow.
+  sidebarInner: {
+    width: 210,
+    minWidth: 210,
+    height: "100%",
+    boxSizing: "border-box",
     padding: "16px 10px",
     display: "flex",
     flexDirection: "column",
     gap: 2,
-    flexShrink: 0,
-    transition: "transform 260ms cubic-bezier(.22,1,.36,1)",
-    boxShadow: "2px 0 18px rgba(0,0,0,0.08)",
   },
   brand: { display: "flex", alignItems: "center", gap: 8, padding: "4px 4px 16px 6px" },
   brandLockup: { height: 22, width: "auto", display: "block" },
@@ -1786,7 +1814,7 @@ const S = {
 
   // year view
   yearGrid: {
-    display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12,
+    display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12,
     padding: 18, overflowY: "auto", flex: 1, alignContent: "start",
   },
   miniMonth: { border: `1px solid ${HAIRLINE}`, borderRadius: 8, padding: 10 },
@@ -1827,7 +1855,7 @@ const S = {
   weekDayNumToday: { background: ACCENT, color: ACCENT_TEXT },
   weekScroll: { flex: 1, overflowY: "auto", overflowX: "hidden" },
   hourLabel: { position: "absolute", left: 0, fontSize: 10, color: GRAY_TEXT },
-  dayCol: { flex: 1, minWidth: 110, position: "relative", borderLeft: `1px solid ${HAIRLINE}` },
+  dayCol: { flex: 1, minWidth: 110, position: "relative", borderLeft: `1px solid ${HAIRLINE}`, touchAction: "none" },
   hourLine: { position: "absolute", left: 0, right: 0, borderTop: `1px solid ${HAIRLINE}` },
   salahBlock: {
     position: "absolute", left: 2, right: 2, background: SUBTLE_BG,
@@ -1867,9 +1895,16 @@ const S = {
   durUnit: { fontSize: 11, color: GRAY_TEXT },
 
   // modal
-  modalOverlay: { position: "absolute", inset: 0, background: "rgba(17,17,17,0.12)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30 },
-  modal: { width: 420, background: WHITE, border: `1px solid ${HAIRLINE}`, borderRadius: 10, padding: 20, boxShadow: "0 8px 24px rgba(0,0,0,0.10)" },
-  modalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
+  modalOverlay: { position: "absolute", inset: 0, background: "rgba(17,17,17,0.12)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30, padding: 16 },
+  modal: {
+    width: 420, background: WHITE, border: `1px solid ${HAIRLINE}`, borderRadius: 10, padding: 20,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+    maxHeight: "calc(100dvh - 32px)", overflowY: "auto",
+  },
+  modalHead: {
+    display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14,
+    position: "sticky", top: -20, background: WHITE, paddingTop: 20, marginTop: -20, zIndex: 1,
+  },
   modalTitle: { fontSize: 15, fontWeight: 600 },
   fieldLabel: { fontSize: 11, fontWeight: 500, color: GRAY_TEXT, display: "block", marginBottom: 5 },
   modalDivider: { borderTop: `1px solid ${HAIRLINE}`, margin: "16px 0" },
@@ -1896,7 +1931,7 @@ const S = {
 
   // ring view
   ringWrap: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 32, padding: 24, minHeight: 0, overflow: "auto" },
-  ringCanvasWrap: { display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, width: 500, height: 500 },
+  ringCanvasWrap: { display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   ringLegend: { width: 200, maxHeight: 420, overflowY: "auto", flexShrink: 0 },
   ringLegendRow: { display: "flex", alignItems: "center", gap: 7, padding: "6px 6px", borderRadius: 6 },
   ringLegendRowActive: { background: SUBTLE_BG },
