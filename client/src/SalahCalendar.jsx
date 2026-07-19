@@ -1518,6 +1518,25 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
   const [weekdays, setWeekdays] = useState(editing?.weekdays || []);
   const [repeatUntil, setRepeatUntil] = useState(editing?.repeatUntil || "");
   const [color, setColor] = useState(editing?.color || DEFAULT_EVENT_COLOR);
+  const dateInputRef = useRef(null);
+  const timeInputRef = useRef(null);
+  function openPicker(ref) {
+    if (!ref.current) return;
+    if (typeof ref.current.showPicker === "function") { try { ref.current.showPicker(); return; } catch (e) {} }
+    ref.current.focus();
+  }
+  function formatDateDisplay(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-").map(Number);
+    if (!y || !m || !d) return "";
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+  function formatTimeDisplay(hhmm) {
+    if (!hhmm) return "";
+    const [h, m] = hhmm.split(":").map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return "";
+    return new Date(2000, 0, 1, h, m).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
 
   function minToHHMM(min) {
     const h = Math.floor(min / 60);
@@ -1559,11 +1578,35 @@ function EventModal({ data, onClose, onSave, onDelete, darkMode }) {
         <div className="sc-dt-row" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
           <div className="sc-dt-field" style={{ flex: "1 1 150px" }}>
             <label style={S.fieldLabel}>Date</label>
-            <input type="date" style={{ ...S.input, width: "100%", colorScheme: darkMode ? "dark" : "light", textAlign: "left" }} value={date} onChange={(e) => setDate(e.target.value)} />
+            <div style={{ position: "relative" }}>
+              <div style={{ ...S.input, width: "100%", boxSizing: "border-box", display: "flex", alignItems: "center", pointerEvents: "none" }}>
+                {formatDateDisplay(date)}
+              </div>
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                onClick={() => openPicker(dateInputRef)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, border: "none", padding: 0, margin: 0, colorScheme: darkMode ? "dark" : "light", cursor: "pointer" }}
+              />
+            </div>
           </div>
           <div className="sc-dt-field" style={{ flex: "1 1 100px" }}>
             <label style={S.fieldLabel}>Start</label>
-            <input type="time" style={{ ...S.input, width: "100%", textAlign: "left" }} value={time} onChange={(e) => setTime(e.target.value)} />
+            <div style={{ position: "relative" }}>
+              <div style={{ ...S.input, width: "100%", boxSizing: "border-box", display: "flex", alignItems: "center", pointerEvents: "none" }}>
+                {formatTimeDisplay(time)}
+              </div>
+              <input
+                ref={timeInputRef}
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                onClick={() => openPicker(timeInputRef)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, border: "none", padding: 0, margin: 0, cursor: "pointer" }}
+              />
+            </div>
           </div>
           <div className="sc-dt-field" style={{ flex: "1 1 90px" }}>
             <label style={S.fieldLabel}>Duration (min)</label>
