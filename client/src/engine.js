@@ -14,7 +14,7 @@ export const DEFAULT_JUDAISM_TIMES = { shacharit: "07:00", mincha: "13:30", maar
 export const DEFAULT_JUDAISM_DURATIONS = { shacharit: 20, mincha: 20, maariv: 20 };
 
 // ---------- Zoroastrianism (the five Gāhs) ----------
-export const ZOROASTRIAN_ORDER = ["havan", "rapithwin", "uzirin", "aiwisruthrem", "ushahin"];
+export const ZOROASTRIAN_ORDER = ["ushahin", "havan", "rapithwin", "uzirin", "aiwisruthrem"];
 export const ZOROASTRIAN_LABEL = {
   havan: "Hāvan",
   rapithwin: "Rapithwin",
@@ -287,30 +287,37 @@ export const SunriseSunsetProvider = {
 };
 
 // The five Gāh windows for one date, per the fixed traditional schedule:
+//   Ushahin        midnight     -> sunrise      (today's own pre-dawn hours)
 //   Hāvan          sunrise      -> solar noon
 //   Rapithwin      solar noon   -> 3:00pm
 //   Uzīrin         3:00pm       -> sunset
 //   Aiwisrūthrəm   sunset       -> midnight
-//   Ushahin        midnight     -> next day's sunrise
-// nextSunrise (the *following* date's sunrise, "HH:MM") lets Ushahin end at
-// the real next sunrise, mirroring how Isha's window uses nextFajr above; if
-// omitted it falls back to today's own sunrise time as an approximation.
+//
+// Unlike Isha (Islam) or Maariv (Judaism), Ushahin does NOT need to be
+// modeled as spilling past midnight into the next calendar date: the whole
+// midnight-to-sunrise stretch already sits inside today's own 00:00-24:00
+// clock, so today's Ushahin window is simply the first window of today,
+// built entirely from today's own sunrise — no next-day fetch required.
+// (An earlier version anchored Ushahin to sunset->next-sunrise starting at
+// today's midnight, which needed tomorrow's sunrise before it would render
+// or load at all, and needed a special cross-midnight carry-over that the
+// per-day block markers didn't participate in — hence Ushahin appearing to
+// not "start" until the day after next, and never showing its own block.
+// Modeling it as this date's own pre-dawn window sidesteps both problems.)
 // Clamped so an unusual timezone/latitude combination (solar noon falling
 // after 3pm local clock, etc.) can't produce a negative-length window.
-export function buildZoroastrianWindows(times, nextSunrise) {
+export function buildZoroastrianWindows(times) {
   const sunriseMin = toMin(times.sunrise);
   const solarNoonMin = Math.max(toMin(times.solarNoon), sunriseMin);
   const rapithwinEndMin = Math.max(15 * 60, solarNoonMin);
   const sunsetMin = Math.max(toMin(times.sunset), rapithwinEndMin);
-  const midnightMin = DAY_END;
-  const nextSunriseMin = midnightMin + (nextSunrise ? toMin(nextSunrise) : sunriseMin);
 
   return [
+    { key: "ushahin", label: ZOROASTRIAN_LABEL.ushahin, windowStart: DAY_START, windowEnd: sunriseMin },
     { key: "havan", label: ZOROASTRIAN_LABEL.havan, windowStart: sunriseMin, windowEnd: solarNoonMin },
     { key: "rapithwin", label: ZOROASTRIAN_LABEL.rapithwin, windowStart: solarNoonMin, windowEnd: rapithwinEndMin },
     { key: "uzirin", label: ZOROASTRIAN_LABEL.uzirin, windowStart: rapithwinEndMin, windowEnd: sunsetMin },
-    { key: "aiwisruthrem", label: ZOROASTRIAN_LABEL.aiwisruthrem, windowStart: sunsetMin, windowEnd: midnightMin },
-    { key: "ushahin", label: ZOROASTRIAN_LABEL.ushahin, windowStart: midnightMin, windowEnd: nextSunriseMin },
+    { key: "aiwisruthrem", label: ZOROASTRIAN_LABEL.aiwisruthrem, windowStart: sunsetMin, windowEnd: DAY_END },
   ];
 }
 

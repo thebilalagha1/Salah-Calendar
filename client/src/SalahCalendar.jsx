@@ -118,7 +118,18 @@ export default function SalahCalendar({ user, onLogout }) {
   }, []);
 
   // ---- AlAdhan integration ----
-  // timesByDate caches real per-day prayer times fetched from AlAdhan, keyed by dateKey.
+  // timesByDate caches real per-day prayer times fetched live (AlAdhan for
+  // Islam, Hebcal for Judaism, SunriseSunset.io for Zoroastrianism), keyed by
+  // "<religion>:<dateKey>" — NOT just dateKey. The three religions' entries
+  // have completely different field shapes (Islam: fajr/dhuhr/...; Judaism:
+  // shacharitStart/...; Zoroastrianism: sunrise/solarNoon/sunset), and
+  // religion-switching updates the `religion` state before the fetch effects
+  // below have a chance to refetch — so for one render after a switch, a
+  // plain dateKey lookup would hand the newly-active religion's window
+  // builder a stale, wrong-shaped entry left over from whichever religion
+  // was active a moment ago (e.g. Islam's buildSalahWindows calling
+  // toMin(times.fajr) on a Zoroastrian entry that has no .fajr at all) and
+  // crash the render. Prefixing the key makes that impossible by construction.
   const [timesByDate, setTimesByDate] = useState({});
   const [locationMode, setLocationMode] = useState("manual"); // manual | coords
   const [coords, setCoords] = useState(null); // { lat, lng }
@@ -185,7 +196,11 @@ export default function SalahCalendar({ user, onLogout }) {
     // Live provider entries carry their own sunrise (and, for Judaism, every
     // other zmanim field); the manual fallback template doesn't have a
     // per-key sunrise, so attach the manual sunrise setting to it here.
-    return timesByDate[dateKey(date)] || { ...salahTimes, sunrise };
+    // Cache key is prefixed with the religion (not just the date) so that
+    // switching religions can never serve a stale, wrong-shaped cached entry
+    // from the previously-active religion for this same calendar date — see
+    // the timesByDate comment near its declaration for why that matters.
+    return timesByDate[`islam:${dateKey(date)}`] || { ...salahTimes, sunrise };
   }
 
   // Windows first (each religion's own edge-case logic lives in engine.js),
@@ -195,19 +210,16 @@ export default function SalahCalendar({ user, onLogout }) {
   // the same for shacharit/mincha/maariv), so one function covers both.
   function windowsForDate(date) {
     if (religion === "judaism") {
-      const live = timesByDate[dateKey(date)];
+      const live = timesByDate[`judaism:${dateKey(date)}`];
       if (live) {
-        const nextLive = timesByDate[dateKey(addDays(date, 1))];
+        const nextLive = timesByDate[`judaism:${dateKey(addDays(date, 1))}`];
         return buildJudaismWindows(live, nextLive ? nextLive.chatzotNightMin : null);
       }
       return buildGenericWindows(JUDAISM_ORDER, JUDAISM_LABEL, salahTimes);
     }
     if (religion === "zoroastrianism") {
-      const live = timesByDate[dateKey(date)];
-      if (live) {
-        const nextLive = timesByDate[dateKey(addDays(date, 1))];
-        return buildZoroastrianWindows(live, nextLive ? nextLive.sunrise : null);
-      }
+      const live = timesByDate[`zoroastrianism:${dateKey(date)}`];
+      if (live) return buildZoroastrianWindows(live);
       return buildGenericWindows(ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, salahTimes);
     }
     const t = getTimesForDate(date);
@@ -232,7 +244,7 @@ export default function SalahCalendar({ user, onLogout }) {
   }
 
   const fetchIslamDate = useCallback(async (date) => {
-    const key = dateKey(date);
+    const key = `islam:${dateKey(date)}`;
     if (locationMode === "manual" || !coords || inFlightRef.has(key)) return;
     inFlightRef.add(key);
     try {
@@ -257,8 +269,10 @@ export default function SalahCalendar({ user, onLogout }) {
     inFlightRef.add(rangeKey);
     try {
       const byDate = await HebcalProvider.fetchRange(coords.lat, coords.lng, tzid, dates);
-      if (Object.keys(byDate).length) {
-        setTimesByDate((prev) => ({ ...prev, ...byDate }));
+      const prefixed = {};
+      for (const dk of Object.keys(byDate)) prefixed[`judaism:${dk}`] = byDate[dk];
+      if (Object.keys(prefixed).length) {
+        setTimesByDate((prev) => ({ ...prev, ...prefixed }));
         setFetchStatus("ok");
       } else {
         setFetchStatus("error");
@@ -271,7 +285,7 @@ export default function SalahCalendar({ user, onLogout }) {
   }, [locationMode, coords, tzid]);
 
   const fetchZoroastrianDate = useCallback(async (date) => {
-    const key = dateKey(date);
+    const key = `zoroastrianism:${dateKey(date)}`;
     if (locationMode === "manual" || !coords || inFlightRef.has(key)) return;
     inFlightRef.add(key);
     try {
@@ -298,7 +312,7 @@ export default function SalahCalendar({ user, onLogout }) {
       const start = startOfWeek(cursor);
       dates = Array.from({ length: 7 }, (_, i) => addDays(start, i));
     } else return; // month/year don't need salah blocks
-    const missing = dates.filter((d) => !timesByDate[dateKey(d)]);
+    const missing = dates.filter((d) => !timesByDate[`${religion}:${dateKey(d)}`]);
     if (!missing.length) return;
     if (religion === "judaism") {
       fetchJudaismRange(missing); // one batch call for the whole visible range
@@ -310,12 +324,10 @@ export default function SalahCalendar({ user, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, dateKey(cursor), locationMode, coords, method, religion]);
 
-  // The two religions' cached entries have different field shapes (Islam:
-  // fajr/dhuhr/... ; Judaism: shacharitStart/minchaStart/...), so clear the
-  // cache whenever religion changes rather than risk mixing shapes.
-  useEffect(() => {
-    setTimesByDate({});
-  }, [religion]);
+  // NOTE: timesByDate keys are religion-prefixed (e.g. "islam:2026-07-24"),
+  // so there's no need to wipe the whole cache on every religion switch —
+  // switching back to a previously-used religion reuses its cached entries
+  // instantly instead of refetching. See getTimesForDate/windowsForDate above.
 
   function detectLocation() {
     if (!navigator.geolocation) {
