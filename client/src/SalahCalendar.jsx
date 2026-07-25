@@ -4,8 +4,10 @@ import {
   DEFAULT_TIMES, DEFAULT_DURATIONS, DEFAULT_SUNRISE, DEFAULT_METHOD, CALC_METHODS, uid, toMin, fmt12, fmt24, dateKey, sameDay,
   addDays, startOfWeek, startOfMonth, daysInMonth, WEEKDAYS, MONTHS,
   occursOnDate, instancesForDate, buildSalahWindows, buildProhibitedWindows, reflow,
-  AladhanProvider, HebcalProvider, buildJudaismWindows, buildGenericWindows,
-  JUDAISM_ORDER, JUDAISM_LABEL, DEFAULT_JUDAISM_TIMES, DEFAULT_JUDAISM_DURATIONS, ORDER_BY_RELIGION, LABEL_BY_RELIGION,
+  AladhanProvider, HebcalProvider, SunriseSunsetProvider, buildJudaismWindows, buildZoroastrianWindows, buildGenericWindows,
+  JUDAISM_ORDER, JUDAISM_LABEL, DEFAULT_JUDAISM_TIMES, DEFAULT_JUDAISM_DURATIONS,
+  ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, DEFAULT_ZOROASTRIAN_TIMES, DEFAULT_ZOROASTRIAN_DURATIONS,
+  ORDER_BY_RELIGION, LABEL_BY_RELIGION, KIND_LABEL_BY_RELIGION,
   EVENT_COLORS, DEFAULT_EVENT_COLOR, hexToRgba,
   SALAH_WINDOW_COLORS, PROHIBITED_COLOR,
 } from "./engine.js";
@@ -54,6 +56,9 @@ const store = {
 
 const SEED_TASKS = [];
 
+// Live prayer-time provider name per religion, for status/hint text in Settings.
+const PROVIDER_NAME_BY_RELIGION = { islam: "AlAdhan", judaism: "Hebcal", zoroastrianism: "SunriseSunset.io" };
+
 // ---------- icons (Tabler-style outline, hand-drawn minimal) ----------
 const Icon = {
   Year: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="4" width="18" height="17" rx="1.5"/><path d="M3 9h18M8 3v3M16 3v3"/></svg>,
@@ -82,17 +87,19 @@ const Icon = {
 export default function SalahCalendar({ user, onLogout }) {
   const [view, setView] = useState("ring"); // ring | day | week | month | year
   const [cursor, setCursor] = useState(new Date());
-  // religion: "islam" | "judaism" | null (null = not chosen yet, show the picker)
+  // religion: "islam" | "judaism" | "zoroastrianism" | null (null = not chosen yet, show the picker)
   const [religion, setReligion] = useState(null);
-  // Manual fallback templates hold BOTH religions' keys at once (fajr..isha
-  // and shacharit/mincha/maariv) — one settings blob, no per-religion storage
-  // key, switching religions later just reads a different subset of keys.
-  const [salahTimes, setSalahTimes] = useState({ ...DEFAULT_TIMES, ...DEFAULT_JUDAISM_TIMES });
-  const [durations, setDurations] = useState({ ...DEFAULT_DURATIONS, ...DEFAULT_JUDAISM_DURATIONS });
+  // Manual fallback templates hold ALL religions' keys at once (fajr..isha,
+  // shacharit/mincha/maariv, havan..ushahin) — one settings blob, no
+  // per-religion storage key, switching religions later just reads a
+  // different subset of keys.
+  const [salahTimes, setSalahTimes] = useState({ ...DEFAULT_TIMES, ...DEFAULT_JUDAISM_TIMES, ...DEFAULT_ZOROASTRIAN_TIMES });
+  const [durations, setDurations] = useState({ ...DEFAULT_DURATIONS, ...DEFAULT_JUDAISM_DURATIONS, ...DEFAULT_ZOROASTRIAN_DURATIONS });
   const [sunrise, setSunrise] = useState(DEFAULT_SUNRISE); // manual fallback, used for Fajr's window end + shading
-  const activeOrder = religion === "judaism" ? JUDAISM_ORDER : SALAH_ORDER;
-  const activeLabel = religion === "judaism" ? JUDAISM_LABEL : SALAH_LABEL;
-  const hasProhibited = religion !== "judaism"; // no halachic equivalent to makruh prayer times
+  const activeOrder = ORDER_BY_RELIGION[religion] || SALAH_ORDER;
+  const activeLabel = LABEL_BY_RELIGION[religion] || SALAH_LABEL;
+  const kindLabel = KIND_LABEL_BY_RELIGION[religion] || "Salah";
+  const hasProhibited = religion === "islam"; // no halachic/Zoroastrian equivalent to makruh prayer times
   const [tasks, setTasks] = useState(SEED_TASKS);
   const [showSettings, setShowSettings] = useState(false);
   const [modal, setModal] = useState(null); // { date } or { editing: task }
@@ -146,7 +153,7 @@ export default function SalahCalendar({ user, onLogout }) {
           if (s.locationMode) setLocationMode(s.locationMode);
           if (s.coords) setCoords(s.coords);
           if (typeof s.method === "number") setMethod(s.method);
-          if (s.religion === "islam" || s.religion === "judaism") setReligion(s.religion);
+          if (["islam", "judaism", "zoroastrianism"].includes(s.religion)) setReligion(s.religion);
         }
       } catch {
         // no saved settings yet — keep the defaults
@@ -194,6 +201,14 @@ export default function SalahCalendar({ user, onLogout }) {
         return buildJudaismWindows(live, nextLive ? nextLive.chatzotNightMin : null);
       }
       return buildGenericWindows(JUDAISM_ORDER, JUDAISM_LABEL, salahTimes);
+    }
+    if (religion === "zoroastrianism") {
+      const live = timesByDate[dateKey(date)];
+      if (live) {
+        const nextLive = timesByDate[dateKey(addDays(date, 1))];
+        return buildZoroastrianWindows(live, nextLive ? nextLive.sunrise : null);
+      }
+      return buildGenericWindows(ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, salahTimes);
     }
     const t = getTimesForDate(date);
     const nextFajr = getTimesForDate(addDays(date, 1)).fajr;
@@ -255,6 +270,25 @@ export default function SalahCalendar({ user, onLogout }) {
     }
   }, [locationMode, coords, tzid]);
 
+  const fetchZoroastrianDate = useCallback(async (date) => {
+    const key = dateKey(date);
+    if (locationMode === "manual" || !coords || inFlightRef.has(key)) return;
+    inFlightRef.add(key);
+    try {
+      const mapped = await SunriseSunsetProvider.fetchDate(coords.lat, coords.lng, date, tzid);
+      if (mapped) {
+        setTimesByDate((prev) => ({ ...prev, [key]: mapped }));
+        setFetchStatus("ok");
+      } else {
+        setFetchStatus("error");
+      }
+    } catch {
+      setFetchStatus("error");
+    } finally {
+      inFlightRef.delete(key);
+    }
+  }, [locationMode, coords, tzid]);
+
   // Auto-fetch prayer times for whichever dates are currently visible (day/week/ring views).
   useEffect(() => {
     if (locationMode === "manual") return;
@@ -268,6 +302,8 @@ export default function SalahCalendar({ user, onLogout }) {
     if (!missing.length) return;
     if (religion === "judaism") {
       fetchJudaismRange(missing); // one batch call for the whole visible range
+    } else if (religion === "zoroastrianism") {
+      missing.forEach((d) => fetchZoroastrianDate(d));
     } else {
       missing.forEach((d) => fetchIslamDate(d));
     }
@@ -580,7 +616,7 @@ export default function SalahCalendar({ user, onLogout }) {
           </div>
           <div style={S.legend} className="sc-legend">
             <span style={S.legendItem} title={`The prayer's exact time block, colored per prayer — ${activeOrder.map((k) => activeLabel[k]).join(", ")}`}>
-              <i style={{ ...S.legendSwatchSalah, backgroundImage: salahBandsCss(activeOrder) }} />{religion === "judaism" ? "Tefillah" : "Salah"}
+              <i style={{ ...S.legendSwatchSalah, backgroundImage: salahBandsCss(activeOrder) }} />{kindLabel}
             </span>
             {(view === "day" || view === "week" || view === "ring") && (
               <>
@@ -713,11 +749,14 @@ export default function SalahCalendar({ user, onLogout }) {
 
             <div style={S.sectionLabel}>Calendar</div>
             <div style={S.segmented}>
-              <button className="sc-btn" style={{ ...S.segBtn, ...(religion !== "judaism" ? S.segBtnActive : {}) }} onClick={() => setReligion("islam")}>
+              <button className="sc-btn" style={{ ...S.segBtn, ...(religion === "islam" ? S.segBtnActive : {}) }} onClick={() => setReligion("islam")}>
                 Islam
               </button>
               <button className="sc-btn" style={{ ...S.segBtn, ...(religion === "judaism" ? S.segBtnActive : {}) }} onClick={() => setReligion("judaism")}>
                 Judaism
+              </button>
+              <button className="sc-btn" style={{ ...S.segBtn, ...(religion === "zoroastrianism" ? S.segBtnActive : {}) }} onClick={() => setReligion("zoroastrianism")}>
+                Zoroastrianism
               </button>
             </div>
 
@@ -732,7 +771,7 @@ export default function SalahCalendar({ user, onLogout }) {
               )}
               {locStatus === "error" && <div style={S.statusErr}>Couldn't get your location. Check your browser's location permission and try again.</div>}
 
-              {religion !== "judaism" && (
+              {religion === "islam" && (
                 <div className="sc-settings-row" style={S.settingsRow}>
                   <div style={S.settingsLabel}>Method</div>
                   <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
@@ -742,16 +781,22 @@ export default function SalahCalendar({ user, onLogout }) {
               )}
 
               {locationMode !== "manual" && fetchStatus === "ok" && (
-                <div style={S.statusOk}>Prayer times are live from {religion === "judaism" ? "Hebcal" : "AlAdhan"} for your location.</div>
+                <div style={S.statusOk}>Prayer times are live from {PROVIDER_NAME_BY_RELIGION[religion]} for your location.</div>
               )}
               {locationMode !== "manual" && fetchStatus === "error" && <div style={S.statusErr}>Couldn't fetch times — showing manual defaults below instead.</div>}
               {locationMode === "manual" && (
-                <div style={S.hint}>No location set yet — using the manual times below for every day. Detect your location to pull real daily times from {religion === "judaism" ? "Hebcal" : "AlAdhan"}.</div>
+                <div style={S.hint}>No location set yet — using the manual times below for every day. Detect your location to pull real daily times from {PROVIDER_NAME_BY_RELIGION[religion]}.</div>
               )}
               {religion === "judaism" && (
                 <div style={S.hint}>
                   Zmanim times courtesy of <a href="https://www.hebcal.com" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>Hebcal.com</a>, licensed under{" "}
                   <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>CC BY 4.0</a>.
+                </div>
+              )}
+              {religion === "zoroastrianism" && (
+                <div style={S.hint}>
+                  Sunrise, solar noon, and sunset times powered by{" "}
+                  <a href="https://sunrisesunset.io" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>SunriseSunset.io</a>.
                 </div>
               )}
             </div>
@@ -773,7 +818,7 @@ export default function SalahCalendar({ user, onLogout }) {
                   </div>
                 </div>
               ))}
-              {religion !== "judaism" && (
+              {religion === "islam" && (
                 <div className="sc-settings-row" style={S.settingsRow}>
                   <div style={S.settingsLabel}>Sunrise</div>
                   <input
@@ -791,6 +836,10 @@ export default function SalahCalendar({ user, onLogout }) {
                 ? (locationMode !== "manual"
                     ? "Shacharit, Mincha, and Maariv windows are pulled from Hebcal automatically; the times above are only used as a fallback."
                     : "Each window runs until the next one starts, so these times only set where each window begins.")
+                : religion === "zoroastrianism"
+                ? (locationMode !== "manual"
+                    ? "Hāvan through Ushahin are computed from SunriseSunset.io's sunrise, solar noon, and sunset automatically; the times above are only used as a fallback."
+                    : "Each window runs until the next one starts, so these times only set where each Gāh begins.")
                 : (locationMode !== "manual"
                     ? "Sunrise is pulled from AlAdhan automatically; the time above is only used as a fallback."
                     : "Used to shade the Fajr prayer window on the calendar and mark the post-sunrise discouraged time.")}
@@ -843,6 +892,10 @@ function ReligionPicker({ darkMode, onPick }) {
         <button className="sc-btn" style={styles_rp.optionBtn} onClick={() => onPick("judaism")}>
           <div style={styles_rp.optionTitle}>Judaism</div>
           <div style={styles_rp.optionDesc}>Shacharit, Mincha, Maariv — via Hebcal.com</div>
+        </button>
+        <button className="sc-btn" style={styles_rp.optionBtn} onClick={() => onPick("zoroastrianism")}>
+          <div style={styles_rp.optionTitle}>Zoroastrianism</div>
+          <div style={styles_rp.optionDesc}>Hāvan, Rapithwin, Uzīrin, Aiwisrūthrəm, Ushahin — via SunriseSunset.io</div>
         </button>
       </div>
     </div>
@@ -1411,7 +1464,7 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
 // ============================================================
 function RingView({ cursor, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, religion, onEditTask, onViewSalah, use24h }) {
   const fmtT = use24h ? fmt24 : fmt12;
-  const kindLabel = religion === "judaism" ? "Tefillah" : "Salah";
+  const kindLabel = KIND_LABEL_BY_RELIGION[religion] || "Salah";
   const [hovered, setHovered] = useState(null); // { key, title, start, dur, kind }
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
 

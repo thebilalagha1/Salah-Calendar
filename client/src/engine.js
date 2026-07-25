@@ -13,10 +13,29 @@ export const JUDAISM_LABEL = { shacharit: "Shacharit", mincha: "Mincha", maariv:
 export const DEFAULT_JUDAISM_TIMES = { shacharit: "07:00", mincha: "13:30", maariv: "19:30" };
 export const DEFAULT_JUDAISM_DURATIONS = { shacharit: 20, mincha: 20, maariv: 20 };
 
+// ---------- Zoroastrianism (the five Gāhs) ----------
+export const ZOROASTRIAN_ORDER = ["havan", "rapithwin", "uzirin", "aiwisruthrem", "ushahin"];
+export const ZOROASTRIAN_LABEL = {
+  havan: "Hāvan",
+  rapithwin: "Rapithwin",
+  uzirin: "Uzīrin",
+  aiwisruthrem: "Aiwisrūthrəm",
+  ushahin: "Ushahin",
+};
+// Manual-fallback placeholders — only used when no location has been
+// detected yet, so SunriseSunset.io can't be queried. Roughly matches the
+// live schedule for a mid-latitude location so the manual defaults aren't
+// wildly off before a real solar fetch happens.
+export const DEFAULT_ZOROASTRIAN_TIMES = { havan: "06:00", rapithwin: "12:00", uzirin: "15:00", aiwisruthrem: "18:00", ushahin: "00:00" };
+export const DEFAULT_ZOROASTRIAN_DURATIONS = { havan: 20, rapithwin: 20, uzirin: 20, aiwisruthrem: 20, ushahin: 20 };
+
 // Order/label lookup by religion, for the handful of call sites that need to
 // render generically regardless of which one is active.
-export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER };
-export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL };
+export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER, zoroastrianism: ZOROASTRIAN_ORDER };
+export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL, zoroastrianism: ZOROASTRIAN_LABEL };
+// What to call a single prayer/observance period in this tradition — used
+// anywhere the UI needs a generic noun instead of "Salah"/"Tefillah" baked in.
+export const KIND_LABEL_BY_RELIGION = { islam: "Salah", judaism: "Tefillah", zoroastrianism: "Gāh" };
 
 export const DAY_START = 0;
 export const DAY_END = 24 * 60;
@@ -39,6 +58,13 @@ export const SALAH_WINDOW_COLORS = {
   shacharit: "#5C6BC0", // indigo — morning
   mincha: "#F9A825",    // amber — afternoon
   maariv: "#283593",    // deep indigo — night
+  // Zoroastrianism's five Gāhs, keyed separately for the same reason as
+  // Judaism's above — a fire-and-light gradient across the day.
+  havan: "#FB8C00",        // dawn fire — sunrise to solar noon
+  rapithwin: "#FDD835",    // brightest gold — solar noon to 3pm
+  uzirin: "#EF6C00",       // deep orange — 3pm to sunset
+  aiwisruthrem: "#6A1B9A", // dusk violet — sunset to midnight
+  ushahin: "#1A237E",      // deep night indigo — midnight to sunrise
 };
 // Traditionally-discouraged prayer windows get their own warm warning tone,
 // distinct from every salah color above, so they never read as "just another salah".
@@ -220,6 +246,73 @@ export const HebcalProvider = {
     return parseHebcalResponse(json);
   },
 };
+
+// ---------- SunriseSunset.io API helpers (Zoroastrianism) ----------
+// The five Gāhs only need three solar events per day — sunrise, solar noon,
+// and sunset — everything else in the schedule is a fixed clock time (3pm,
+// midnight), so this provider is intentionally the thinnest of the three.
+export function buildSunriseSunsetUrl(date, lat, lng, tzid) {
+  return `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=${dateKey(date)}&timezone=${encodeURIComponent(tzid)}&time_format=24`;
+}
+// Parses a SunriseSunset.io response into { sunrise, solarNoon, sunset } as
+// "HH:MM" 24-hour strings, or null if the request failed or a field is
+// missing (e.g. a genuine edge case like a polar location with no sunrise).
+export function parseSunriseSunsetTimings(json) {
+  if (json?.status !== "OK" || !json?.results) return null;
+  const r = json.results;
+  // Times come back as e.g. "6:48:29" or "18:36:01" — hour isn't zero-padded,
+  // so a fixed-width slice breaks for any single-digit hour. Match the
+  // leading "H:MM" or "HH:MM" instead and pad it ourselves.
+  const clean = (v) => {
+    if (typeof v !== "string") return null;
+    const m = v.match(/^(\d{1,2}):(\d{2})/);
+    return m ? `${m[1].padStart(2, "0")}:${m[2]}` : null;
+  };
+  const mapped = {
+    sunrise: clean(r.sunrise),
+    solarNoon: clean(r.solar_noon),
+    sunset: clean(r.sunset),
+  };
+  return mapped.sunrise && mapped.solarNoon && mapped.sunset ? mapped : null;
+}
+
+export const SunriseSunsetProvider = {
+  religion: "zoroastrianism",
+  async fetchDate(lat, lng, date, tzid) {
+    const res = await fetch(buildSunriseSunsetUrl(date, lat, lng, tzid));
+    if (!res.ok) throw new Error(`SunriseSunset.io request failed (${res.status})`);
+    const json = await res.json();
+    return parseSunriseSunsetTimings(json);
+  },
+};
+
+// The five Gāh windows for one date, per the fixed traditional schedule:
+//   Hāvan          sunrise      -> solar noon
+//   Rapithwin      solar noon   -> 3:00pm
+//   Uzīrin         3:00pm       -> sunset
+//   Aiwisrūthrəm   sunset       -> midnight
+//   Ushahin        midnight     -> next day's sunrise
+// nextSunrise (the *following* date's sunrise, "HH:MM") lets Ushahin end at
+// the real next sunrise, mirroring how Isha's window uses nextFajr above; if
+// omitted it falls back to today's own sunrise time as an approximation.
+// Clamped so an unusual timezone/latitude combination (solar noon falling
+// after 3pm local clock, etc.) can't produce a negative-length window.
+export function buildZoroastrianWindows(times, nextSunrise) {
+  const sunriseMin = toMin(times.sunrise);
+  const solarNoonMin = Math.max(toMin(times.solarNoon), sunriseMin);
+  const rapithwinEndMin = Math.max(15 * 60, solarNoonMin);
+  const sunsetMin = Math.max(toMin(times.sunset), rapithwinEndMin);
+  const midnightMin = DAY_END;
+  const nextSunriseMin = midnightMin + (nextSunrise ? toMin(nextSunrise) : sunriseMin);
+
+  return [
+    { key: "havan", label: ZOROASTRIAN_LABEL.havan, windowStart: sunriseMin, windowEnd: solarNoonMin },
+    { key: "rapithwin", label: ZOROASTRIAN_LABEL.rapithwin, windowStart: solarNoonMin, windowEnd: rapithwinEndMin },
+    { key: "uzirin", label: ZOROASTRIAN_LABEL.uzirin, windowStart: rapithwinEndMin, windowEnd: sunsetMin },
+    { key: "aiwisruthrem", label: ZOROASTRIAN_LABEL.aiwisruthrem, windowStart: sunsetMin, windowEnd: midnightMin },
+    { key: "ushahin", label: ZOROASTRIAN_LABEL.ushahin, windowStart: midnightMin, windowEnd: nextSunriseMin },
+  ];
+}
 
 // Shacharit/Mincha/Maariv windows from live Hebcal data for one date.
 // nextDayChatzotNightMin should be the *following* date's chatzotNightMin
