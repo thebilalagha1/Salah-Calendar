@@ -40,6 +40,56 @@ export const KIND_LABEL_BY_RELIGION = { islam: "Salah", judaism: "Tefillah", zor
 export const DAY_START = 0;
 export const DAY_END = 24 * 60;
 
+// A prayer *window* (Fajr's permissible period, a zman, a Gāh) is never
+// user-movable — it's derived purely from solar/provider data. What IS
+// movable, for every faith, is where WITHIN that window the person actually
+// prays: this clamps a user-chosen "minutes after the window opens" offset
+// so the resulting block (of length `dur`) can never be dragged outside its
+// own window, even if the window's length changes day to day (a shorter
+// window on some date just re-clamps the same offset automatically).
+export function clampPrayerOffset(offsetMin, windowStart, windowEnd, dur) {
+  const span = Math.max(0, (windowEnd - windowStart) - dur);
+  return Math.min(Math.max(offsetMin || 0, 0), span);
+}
+
+// A prayer time is movable within its window, but a FIXED (non-movable)
+// task never moves for anything — that's the whole point of marking a task
+// fixed. So wherever the user has dragged a prayer's block to, this nudges
+// it off any fixed task it would land on, still staying inside the window:
+// first tries pushing forward past the obstacle (same convention reflow
+// uses for movable tasks avoiding prayer blocks), and if that doesn't fit
+// in the window, tries backing up before the earliest obstacle instead. If
+// fixed tasks fill the entire window (no gap exists), it clamps to the
+// window's own bounds and accepts the overlap rather than escaping the
+// window — the window boundary is a harder constraint than this one.
+export function resolveBlockAgainstFixedTasks(start, dur, windowStart, windowEnd, fixedIntervals) {
+  const maxStart = windowEnd - dur;
+  const clampedStart = Math.max(windowStart, Math.min(maxStart, start));
+  if (!fixedIntervals.length) return clampedStart;
+
+  let s = clampedStart;
+  let guard = 0;
+  while (guard < 20) {
+    guard++;
+    const hit = fixedIntervals.find((o) => s < o.end && s + dur > o.start);
+    if (!hit) return s;
+    s = hit.end;
+    if (s > maxStart) break;
+  }
+
+  s = clampedStart;
+  guard = 0;
+  while (guard < 20) {
+    guard++;
+    const hit = fixedIntervals.find((o) => s < o.end && s + dur > o.start);
+    if (!hit) return Math.max(windowStart, s);
+    s = hit.start - dur;
+    if (s < windowStart) break;
+  }
+
+  return clampedStart; // fixed tasks fill the whole window — nothing better to do
+}
+
 export const DEFAULT_TIMES = { fajr: "05:10", dhuhr: "13:05", asr: "16:35", maghrib: "19:50", isha: "21:15" };
 export const DEFAULT_DURATIONS = { fajr: 20, dhuhr: 20, asr: 20, maghrib: 20, isha: 20 };
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
-  SALAH_ORDER, SALAH_LABEL, DAY_START, DAY_END,
+  SALAH_ORDER, SALAH_LABEL, DAY_START, DAY_END, clampPrayerOffset, resolveBlockAgainstFixedTasks,
   DEFAULT_TIMES, DEFAULT_DURATIONS, DEFAULT_SUNRISE, DEFAULT_METHOD, CALC_METHODS, uid, toMin, fmt12, fmt24, dateKey, sameDay,
   addDays, startOfWeek, startOfMonth, daysInMonth, WEEKDAYS, MONTHS,
   occursOnDate, instancesForDate, buildSalahWindows, buildProhibitedWindows, reflow,
@@ -96,6 +96,11 @@ export default function SalahCalendar({ user, onLogout }) {
   const [salahTimes, setSalahTimes] = useState({ ...DEFAULT_TIMES, ...DEFAULT_JUDAISM_TIMES, ...DEFAULT_ZOROASTRIAN_TIMES });
   const [durations, setDurations] = useState({ ...DEFAULT_DURATIONS, ...DEFAULT_JUDAISM_DURATIONS, ...DEFAULT_ZOROASTRIAN_DURATIONS });
   const [sunrise, setSunrise] = useState(DEFAULT_SUNRISE); // manual fallback, used for Fajr's window end + shading
+  // Where WITHIN its window the person actually prays, per prayer key, as
+  // minutes after the window opens (0 = right at window start, the old
+  // fixed behavior). The window itself is never user-movable for any faith
+  // — only this offset is — see clampPrayerOffset in engine.js.
+  const [prayerOffsets, setPrayerOffsets] = useState({});
   const activeOrder = ORDER_BY_RELIGION[religion] || SALAH_ORDER;
   const activeLabel = LABEL_BY_RELIGION[religion] || SALAH_LABEL;
   const kindLabel = KIND_LABEL_BY_RELIGION[religion] || "Salah";
@@ -159,6 +164,7 @@ export default function SalahCalendar({ user, onLogout }) {
           if (s.salahTimes) setSalahTimes((prev) => ({ ...prev, ...s.salahTimes }));
           if (s.durations) setDurations((prev) => ({ ...prev, ...s.durations }));
           if (s.sunrise) setSunrise(s.sunrise);
+          if (s.prayerOffsets) setPrayerOffsets((prev) => ({ ...prev, ...s.prayerOffsets }));
           if (typeof s.darkMode === "boolean") setDarkMode(s.darkMode);
           if (typeof s.use24h === "boolean") setUse24h(s.use24h);
           if (s.locationMode) setLocationMode(s.locationMode);
@@ -180,9 +186,9 @@ export default function SalahCalendar({ user, onLogout }) {
 
   useEffect(() => {
     if (!storageLoaded) return;
-    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, darkMode, use24h, locationMode, coords, method, religion }));
+    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, religion }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [salahTimes, durations, sunrise, darkMode, use24h, locationMode, coords, method, religion, storageLoaded]);
+  }, [salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, religion, storageLoaded]);
 
   // Browser's IANA zone — passed to Hebcal as tzid. In practice this matches
   // the location the user detected coordinates for, since both come from the
@@ -227,10 +233,21 @@ export default function SalahCalendar({ user, onLogout }) {
     return buildSalahWindows(t, t.sunrise, nextFajr);
   }
   function salahBlocksForDate(date) {
+    // Fixed tasks never move for anything (that's what "fixed" means), so a
+    // prayer's exact time — wherever the user has dragged it within its
+    // window — is resolved off of them here, every time this is called, not
+    // just during an interactive drag on one specific day. A one-off fixed
+    // meeting that only exists on a different date than the one you dragged
+    // on is still respected.
+    const dayFixed = instancesForDate(tasks, date)
+      .filter((t) => !t.movable)
+      .map((t) => ({ start: t.start, end: t.start + t.dur }));
     return windowsForDate(date)
       .map((w) => {
         const dur = durations[w.key] ?? 20;
-        return { key: w.key, label: w.label, start: w.windowStart, end: w.windowStart + dur, dur };
+        const offset = clampPrayerOffset(prayerOffsets[w.key], w.windowStart, w.windowEnd, dur);
+        const start = resolveBlockAgainstFixedTasks(w.windowStart + offset, dur, w.windowStart, w.windowEnd, dayFixed);
+        return { key: w.key, label: w.label, start, end: start + dur, dur, windowStart: w.windowStart, windowEnd: w.windowEnd };
       })
       .sort((a, b) => a.start - b.start);
   }
@@ -688,6 +705,7 @@ export default function SalahCalendar({ user, onLogout }) {
               activeLabel={activeLabel}
               onEditTask={(t) => setModal({ editing: t })}
               onViewSalah={(date, block, win) => setSalahDetail({ date, block, win })}
+              onMovePrayerBlock={(key, offsetMin) => setPrayerOffsets((prev) => ({ ...prev, [key]: offsetMin }))}
               onAddAt={(date, startMin, durMin) => setModal({ date, start: startMin, dur: durMin })}
               onPickDate={(d) => { setCursor(d); setView("day"); }}
               lastNotes={lastNotes}
@@ -707,6 +725,7 @@ export default function SalahCalendar({ user, onLogout }) {
               activeLabel={activeLabel}
               onEditTask={(t) => setModal({ editing: t })}
               onViewSalah={(date, block, win) => setSalahDetail({ date, block, win })}
+              onMovePrayerBlock={(key, offsetMin) => setPrayerOffsets((prev) => ({ ...prev, [key]: offsetMin }))}
               onAddAt={(date, startMin, durMin) => setModal({ date, start: startMin, dur: durMin })}
               lastNotes={lastNotes}
               setLastNotes={setLastNotes}
@@ -1079,7 +1098,7 @@ function MonthView({ cursor, tasks, onPickDay, onAddOnDay, use24h }) {
 // ============================================================
 // Timeline view (Day = 1 column, Week = 7 columns) with salah reflow
 // ============================================================
-function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, activeOrder, activeLabel, onEditTask, onViewSalah, onAddAt, onPickDate, lastNotes, setLastNotes, use24h, isMobile }) {
+function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, prohibitedWindowsForDate, activeOrder, activeLabel, onEditTask, onViewSalah, onMovePrayerBlock, onAddAt, onPickDate, lastNotes, setLastNotes, use24h, isMobile }) {
   const fmtT = use24h ? fmt24 : fmt12;
   const isSingleDay = dates.length === 1;
   const colRefs = useRef({});
@@ -1123,6 +1142,67 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onAddAt]);
+
+  // Dragging a prayer-time block: moves the exact prayer moment WITHIN its
+  // (fixed) window for every faith — Fajr, a zman, or a Gāh. `windowStart`/
+  // `windowEnd` on each block (set in salahBlocksForDate) bound the drag so
+  // it can never leave its own window. A plain click/tap (no real movement)
+  // still opens the detail view via the block's own onClick, undisturbed;
+  // `suppressClickRef` only swallows the click that immediately follows an
+  // actual drag, so the detail view doesn't pop open right after moving it.
+  const prayerDragRef = useRef(null); // { key, colKey, date, dur, windowStart, windowEnd, startMin, curMin, moved }
+  const [prayerDragVisual, setPrayerDragVisual] = useState(null); // { key, colKey, start }
+  const suppressClickRef = useRef(false);
+
+  // Kept fresh every render (not in an effect) so pointer-event handlers —
+  // which always fire after a render has committed — see this render's
+  // fixed-task layout immediately, without a stale-by-one-render lag.
+  const fixedTasksByDateRef = useRef({});
+  fixedTasksByDateRef.current = Object.fromEntries(
+    dates.map((d) => [
+      dateKey(d),
+      instancesForDate(tasks, d).filter((t) => !t.movable).map((t) => ({ start: t.start, end: t.start + t.dur })),
+    ])
+  );
+
+  useEffect(() => {
+    function handleMove(e) {
+      const d = prayerDragRef.current;
+      if (!d) return;
+      const el = colRefs.current[d.colKey];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const span = Math.max(0, (d.windowEnd - d.windowStart) - d.dur);
+      const posMin = DAY_START + Math.round(y / PX_PER_MIN / 5) * 5; // absolute minute under the pointer, snapped to 5 min
+      const clampedOffset = Math.max(0, Math.min(span, posMin - d.windowStart)); // minutes into the window
+      const desired = d.windowStart + clampedOffset;
+      const fixed = fixedTasksByDateRef.current[d.colKey] || [];
+      const m = resolveBlockAgainstFixedTasks(desired, d.dur, d.windowStart, d.windowEnd, fixed);
+      if (Math.abs(m - d.startMin) >= 5) d.moved = true;
+      d.curMin = m;
+      setPrayerDragVisual({ key: d.key, colKey: d.colKey, start: m });
+    }
+    function handleUp() {
+      const d = prayerDragRef.current;
+      if (!d) return;
+      prayerDragRef.current = null;
+      setPrayerDragVisual(null);
+      if (d.moved) {
+        suppressClickRef.current = true;
+        onMovePrayerBlock(d.key, d.curMin - d.windowStart);
+      }
+    }
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onMovePrayerBlock]);
 
   const dayData = useMemo(() => {
     return dates.map((d) => {
@@ -1308,25 +1388,48 @@ function TimelineView({ dates, tasks, salahBlocksForDate, salahWindowsForDate, p
                   />
                 )}
 
-                {blocks.map((s) => (
-                  <div
-                    key={s.key}
-                    className="sc-salah-block"
-                    title={`View ${s.label} time`}
-                    style={{
-                      ...S.salahBlock,
-                      top: (s.start - DAY_START) * PX_PER_MIN,
-                      height: Math.max(18, s.dur * PX_PER_MIN),
-                      background: hexToRgba(SALAH_WINDOW_COLORS[s.key], 0.16),
-                      borderColor: hexToRgba(SALAH_WINDOW_COLORS[s.key], 0.7),
-                      borderLeft: `3px solid ${SALAH_WINDOW_COLORS[s.key]}`,
-                      cursor: "pointer",
-                    }}
-                    onClick={() => onViewSalah && onViewSalah(date, s, windows.find((w) => w.key === s.key))}
-                  >
-                    <span style={S.salahName}>{s.label}</span>
-                  </div>
-                ))}
+                {blocks.map((s) => {
+                  const isDraggingThis = prayerDragVisual && prayerDragVisual.key === s.key && prayerDragVisual.colKey === colKey;
+                  const visualStart = isDraggingThis ? prayerDragVisual.start : s.start;
+                  return (
+                    <div
+                      key={s.key}
+                      className="sc-salah-block"
+                      title={`${s.label} — drag to set your prayer time within its window (double-click to reset)`}
+                      style={{
+                        ...S.salahBlock,
+                        top: (visualStart - DAY_START) * PX_PER_MIN,
+                        height: Math.max(18, s.dur * PX_PER_MIN),
+                        background: hexToRgba(SALAH_WINDOW_COLORS[s.key], 0.16),
+                        borderColor: hexToRgba(SALAH_WINDOW_COLORS[s.key], 0.7),
+                        borderLeft: `3px solid ${SALAH_WINDOW_COLORS[s.key]}`,
+                        cursor: isDraggingThis ? "grabbing" : "grab",
+                        zIndex: isDraggingThis ? 5 : undefined,
+                        touchAction: "none",
+                      }}
+                      onPointerDown={(e) => {
+                        if (!e.isPrimary) return;
+                        e.stopPropagation();
+                        e.currentTarget.setPointerCapture?.(e.pointerId);
+                        prayerDragRef.current = {
+                          key: s.key, colKey, date,
+                          dur: s.dur, windowStart: s.windowStart, windowEnd: s.windowEnd,
+                          startMin: s.start, curMin: s.start, moved: false,
+                        };
+                      }}
+                      onClick={() => {
+                        if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+                        onViewSalah && onViewSalah(date, s, windows.find((w) => w.key === s.key));
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        onMovePrayerBlock && onMovePrayerBlock(s.key, 0); // reset to the window's own start
+                      }}
+                    >
+                      <span style={S.salahName}>{s.label}</span>
+                    </div>
+                  );
+                })}
 
                 {dayTasks.map((t) => {
                   const wasMoved = lastNotes.some((n) => n.id === (t.occurrenceKey || t.id));
