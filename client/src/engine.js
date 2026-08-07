@@ -63,13 +63,27 @@ export const CATHOLIC_LABEL = {
 export const DEFAULT_CATHOLIC_TIMES = { officeOfReadings: "06:00", morningPrayer: "07:00", daytimePrayer: "12:00", eveningPrayer: "18:00", nightPrayer: "21:00" };
 export const DEFAULT_CATHOLIC_DURATIONS = { officeOfReadings: 15, morningPrayer: 15, daytimePrayer: 10, eveningPrayer: 15, nightPrayer: 10 };
 
+// ---------- Sikhism (Nitnem — daily banis) ----------
+// Three daily observances: Amrit Vela (the pre-dawn banis, prayed in the
+// "ambrosial hours" before sunrise), Rehras (at sunset), and Kirtan Sohila
+// (before sleep). Same three-window shape as Judaism's tefillot, but with
+// its own sun-anchoring rule — see buildSikhWindows below.
+export const SIKH_ORDER = ["amritVela", "rehras", "kirtanSohila"];
+export const SIKH_LABEL = { amritVela: "Amrit Vela", rehras: "Rehras", kirtanSohila: "Kirtan Sohila" };
+// Manual-fallback placeholders. Rehras is traditionally at sunset, so it
+// gets overridden with live sunset when a location is available (see
+// buildSikhWindows); Amrit Vela's *start* (how early the pre-dawn hours
+// begin) and Kirtan Sohila have no live source and are always manual.
+export const DEFAULT_SIKH_TIMES = { amritVela: "03:00", rehras: "18:00", kirtanSohila: "21:30" };
+export const DEFAULT_SIKH_DURATIONS = { amritVela: 30, rehras: 15, kirtanSohila: 10 };
+
 // Order/label lookup by religion, for the handful of call sites that need to
 // render generically regardless of which one is active.
-export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER, zoroastrianism: ZOROASTRIAN_ORDER, catholic: CATHOLIC_ORDER };
-export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL, zoroastrianism: ZOROASTRIAN_LABEL, catholic: CATHOLIC_LABEL };
+export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER, zoroastrianism: ZOROASTRIAN_ORDER, catholic: CATHOLIC_ORDER, sikh: SIKH_ORDER };
+export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL, zoroastrianism: ZOROASTRIAN_LABEL, catholic: CATHOLIC_LABEL, sikh: SIKH_LABEL };
 // What to call a single prayer/observance period in this tradition — used
 // anywhere the UI needs a generic noun instead of "Salah"/"Tefillah" baked in.
-export const KIND_LABEL_BY_RELIGION = { islam: "Salah", judaism: "Tefillah", zoroastrianism: "Gāh", catholic: "Hour" };
+export const KIND_LABEL_BY_RELIGION = { islam: "Salah", judaism: "Tefillah", zoroastrianism: "Gāh", catholic: "Hour", sikh: "Bani" };
 
 export const DAY_START = 0;
 export const DAY_END = 24 * 60;
@@ -156,6 +170,10 @@ export const SALAH_WINDOW_COLORS = {
   daytimePrayer: "#43A047",    // midday green
   eveningPrayer: "#8E24AA",    // dusk violet — Vespers
   nightPrayer: "#1A237E",      // deep night indigo — Compline
+  // Sikhism's three banis, keyed separately for the same reason as the others above.
+  amritVela: "#283593",    // pre-dawn deep indigo — the ambrosial hours
+  rehras: "#F4511E",       // sunset orange
+  kirtanSohila: "#1A237E", // deep night indigo
 };
 // Traditionally-discouraged prayer windows get their own warm warning tone,
 // distinct from every salah color above, so they never read as "just another salah".
@@ -460,6 +478,31 @@ export function buildCatholicWindows(times, sunrise, sunset) {
   if (sunrise) merged.morningPrayer = sunrise;
   if (sunset) merged.eveningPrayer = sunset;
   return buildGenericWindows(CATHOLIC_ORDER, CATHOLIC_LABEL, merged);
+}
+
+// Amrit Vela's window runs from its own (always-manual) start until sunrise
+// — mirroring how Fajr's window ends at sunrise in buildSalahWindows — since
+// the whole point of Amrit Vela is the pre-dawn hours, not a point in time.
+// Rehras' window starts at sunset (live when available, else the manual
+// fallback) and runs until Kirtan Sohila's own manual start; Kirtan Sohila
+// then runs from there to end of day. Clamped with Math.max the same way
+// buildZoroastrianWindows is, so an unusual timezone/latitude combination
+// (e.g. sunset falling after the configured Kirtan Sohila time in high
+// summer) can't produce a negative-length Rehras window.
+export function buildSikhWindows(times, sunrise, sunset) {
+  const amritStart = toMin(times.amritVela);
+  const sunriseMin = sunrise ? toMin(sunrise) : null;
+  const amritEnd = sunriseMin != null && sunriseMin > amritStart ? sunriseMin : amritStart + 60;
+
+  const rehrasStart = sunset ? toMin(sunset) : toMin(times.rehras);
+  const kirtanAnchor = toMin(times.kirtanSohila);
+  const rehrasEnd = Math.max(kirtanAnchor, rehrasStart + 5);
+
+  return [
+    { key: "amritVela", label: SIKH_LABEL.amritVela, windowStart: amritStart, windowEnd: amritEnd },
+    { key: "rehras", label: SIKH_LABEL.rehras, windowStart: rehrasStart, windowEnd: rehrasEnd },
+    { key: "kirtanSohila", label: SIKH_LABEL.kirtanSohila, windowStart: rehrasEnd, windowEnd: DAY_END },
+  ];
 }
 
 export function toMin(hhmm) {
