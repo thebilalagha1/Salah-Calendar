@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   SALAH_ORDER, SALAH_LABEL, DAY_START, DAY_END, clampPrayerOffset, resolveBlockAgainstFixedTasks,
-  SALAH_ORDER_COMBINED, SALAH_LABEL_COMBINED, PRAYER_STRUCTURE_OPTIONS, DEFAULT_PRAYER_STRUCTURE,
   DEFAULT_TIMES, DEFAULT_DURATIONS, DEFAULT_SUNRISE, DEFAULT_METHOD, CALC_METHODS, uid, toMin, fmt12, fmt24, dateKey, sameDay,
   addDays, startOfWeek, startOfMonth, daysInMonth, WEEKDAYS, MONTHS,
   occursOnDate, instancesForDate, buildSalahWindows, buildProhibitedWindows, reflow,
@@ -91,9 +90,6 @@ export default function SalahCalendar({ user, onLogout }) {
   const [cursor, setCursor] = useState(new Date());
   // religion: "islam" | "judaism" | "zoroastrianism" | null (null = not chosen yet, show the picker)
   const [religion, setReligion] = useState(null);
-  // Islam only: "5" (default, each prayer its own window) or "3" (Asr folded
-  // into Dhuhr's window, Isha folded into Maghrib's) — see buildSalahWindows.
-  const [prayerStructure, setPrayerStructure] = useState(DEFAULT_PRAYER_STRUCTURE);
   // Manual fallback templates hold ALL religions' keys at once (fajr..isha,
   // shacharit/mincha/maariv, havan..ushahin) — one settings blob, no
   // per-religion storage key, switching religions later just reads a
@@ -106,8 +102,8 @@ export default function SalahCalendar({ user, onLogout }) {
   // fixed behavior). The window itself is never user-movable for any faith
   // — only this offset is — see clampPrayerOffset in engine.js.
   const [prayerOffsets, setPrayerOffsets] = useState({});
-  const activeOrder = (religion === "islam" && prayerStructure === "3") ? SALAH_ORDER_COMBINED : (ORDER_BY_RELIGION[religion] || SALAH_ORDER);
-  const activeLabel = (religion === "islam" && prayerStructure === "3") ? SALAH_LABEL_COMBINED : (LABEL_BY_RELIGION[religion] || SALAH_LABEL);
+  const activeOrder = ORDER_BY_RELIGION[religion] || SALAH_ORDER;
+  const activeLabel = LABEL_BY_RELIGION[religion] || SALAH_LABEL;
   const kindLabel = KIND_LABEL_BY_RELIGION[religion] || "Salah";
   const hasProhibited = religion === "islam"; // no halachic/Zoroastrian equivalent to makruh prayer times
   const [tasks, setTasks] = useState(SEED_TASKS);
@@ -144,12 +140,6 @@ export default function SalahCalendar({ user, onLogout }) {
   const [locationMode, setLocationMode] = useState("manual"); // manual | coords
   const [coords, setCoords] = useState(null); // { lat, lng }
   const [method, setMethod] = useState(DEFAULT_METHOD);
-  // Remembers the last non-Ja'fari method so switching the prayer structure
-  // back to "5" can restore it, instead of always dropping to DEFAULT_METHOD.
-  const prevMethodRef = useRef(DEFAULT_METHOD);
-  useEffect(() => {
-    if (method !== 0) prevMethodRef.current = method;
-  }, [method]);
   // Zoroastrianism only: whether the Hāvan/Rapithwin boundary uses true solar
   // noon (live from SunriseSunset.io) or a flat 12:00pm clock time.
   const [noonCalculation, setNoonCalculation] = useState(DEFAULT_NOON_CALCULATION);
@@ -184,7 +174,6 @@ export default function SalahCalendar({ user, onLogout }) {
           if (s.locationMode) setLocationMode(s.locationMode);
           if (s.coords) setCoords(s.coords);
           if (typeof s.method === "number") setMethod(s.method);
-          if (["5", "3"].includes(s.prayerStructure)) setPrayerStructure(s.prayerStructure);
           if (["solar", "clock"].includes(s.noonCalculation)) setNoonCalculation(s.noonCalculation);
           if (["islam", "judaism", "zoroastrianism"].includes(s.religion)) setReligion(s.religion);
         }
@@ -202,9 +191,9 @@ export default function SalahCalendar({ user, onLogout }) {
 
   useEffect(() => {
     if (!storageLoaded) return;
-    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, prayerStructure, noonCalculation, religion }));
+    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, noonCalculation, religion }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, prayerStructure, noonCalculation, religion, storageLoaded]);
+  }, [salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, noonCalculation, religion, storageLoaded]);
 
   // Browser's IANA zone — passed to Hebcal as tzid. In practice this matches
   // the location the user detected coordinates for, since both come from the
@@ -246,7 +235,7 @@ export default function SalahCalendar({ user, onLogout }) {
     }
     const t = getTimesForDate(date);
     const nextFajr = getTimesForDate(addDays(date, 1)).fajr;
-    return buildSalahWindows(t, t.sunrise, nextFajr, prayerStructure);
+    return buildSalahWindows(t, t.sunrise, nextFajr);
   }
   function salahBlocksForDate(date) {
     // Fixed tasks never move for anything (that's what "fixed" means), so a
@@ -821,47 +810,9 @@ export default function SalahCalendar({ user, onLogout }) {
               {religion === "islam" && (
                 <div className="sc-settings-row" style={S.settingsRow}>
                   <div style={S.settingsLabel}>Method</div>
-                  <select
-                    style={{ ...S.input, marginLeft: "auto", minWidth: 0 }}
-                    value={method}
-                    onChange={(e) => {
-                      const m = Number(e.target.value);
-                      setMethod(m);
-                      setTimesByDate({});
-                      // Linked with Prayer Structure: Ja'fari calculation
-                      // implies the combined 3-prayer structure, and picking
-                      // any other method implies the standard 5.
-                      setPrayerStructure(m === 0 ? "3" : "5");
-                    }}
-                  >
+                  <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
                     {CALC_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
-                </div>
-              )}
-
-              {religion === "islam" && (
-                <div className="sc-settings-row" style={S.settingsRow}>
-                  <div style={{ ...S.settingsLabel, width: 100 }}>Prayer Structure</div>
-                  <select
-                    style={{ ...S.input, marginLeft: "auto", minWidth: 0, flexShrink: 1 }}
-                    value={prayerStructure}
-                    onChange={(e) => {
-                      const ps = e.target.value;
-                      setPrayerStructure(ps);
-                      // Linked with Method: combined structure implies
-                      // Ja'fari calculation; switching back to 5 restores
-                      // whichever non-Ja'fari method was active before.
-                      setMethod(ps === "3" ? 0 : prevMethodRef.current);
-                      setTimesByDate({});
-                    }}
-                  >
-                    {PRAYER_STRUCTURE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-              )}
-              {religion === "islam" && prayerStructure === "3" && (
-                <div style={S.hint}>
-                  Combines Dhuhr with Asr and Maghrib with Isha — the standard practice in Ja'fari (Shia) jurisprudence, and permitted in Sunni schools under travel or necessity. Linked to the Ja'fari calculation method above.
                 </div>
               )}
 

@@ -4,21 +4,6 @@
 
 export const SALAH_ORDER = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
 export const SALAH_LABEL = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
-// "Combined" prayer structure: Asr is prayed together with Dhuhr, and Isha
-// together with Maghrib — the standing default in Ja'fari (Twelver Shia)
-// fiqh, and permitted in Sunni schools under travel/necessity. Fajr is never
-// combined with anything in any school. Only the ORDER/LABEL shrink to three
-// entries; the underlying solar times (dhuhr/asr/maghrib/isha) still come
-// from the same source — see buildSalahWindows' combined-mode branch, which
-// just merges Asr's window into Dhuhr's and Isha's into Maghrib's rather
-// than recomputing anything astronomically.
-export const SALAH_ORDER_COMBINED = ["fajr", "dhuhr", "maghrib"];
-export const SALAH_LABEL_COMBINED = { fajr: "Fajr", dhuhr: "Dhuhr / Asr", maghrib: "Maghrib / Isha" };
-export const PRAYER_STRUCTURE_OPTIONS = [
-  { value: "5", label: "5 Prayers" },
-  { value: "3", label: "3 Prayers (Combined)" },
-];
-export const DEFAULT_PRAYER_STRUCTURE = "5";
 
 // ---------- Judaism (zmanim / tefillot) ----------
 export const JUDAISM_ORDER = ["shacharit", "mincha", "maariv"];
@@ -176,7 +161,6 @@ export function hexToRgba(hex, alpha) {
 // ---------- AlAdhan API helpers ----------
 export const DEFAULT_METHOD = 2;
 export const CALC_METHODS = [
-  { value: 0, label: "Shia Ithna-Ashari, Leva Institute, Qum" },
   { value: 1, label: "University of Islamic Sciences, Karachi" },
   { value: 2, label: "Islamic Society of North America (ISNA)" },
   { value: 3, label: "Muslim World League" },
@@ -547,14 +531,14 @@ export function buildSalahBlocks(times, durations) {
 // midnight typically falls shortly after 12am — callers that render a
 // single fixed-height day (e.g. a day-view column) should clamp/wrap that
 // overflow themselves; a circular ring naturally wraps it for free.
-export function buildSalahWindows(times, sunrise, nextFajr, prayerStructure = DEFAULT_PRAYER_STRUCTURE) {
+export function buildSalahWindows(times, sunrise, nextFajr) {
   const sorted = SALAH_ORDER
     .map((key) => ({ key, label: SALAH_LABEL[key], start: toMin(times[key]) }))
     .sort((a, b) => a.start - b.start);
   const sunriseMin = sunrise ? toMin(sunrise) : null;
   const maghribMin = toMin(times.maghrib);
 
-  const windows = sorted.map((s, i) => {
+  return sorted.map((s, i) => {
     let windowEnd;
     if (s.key === "fajr" && sunriseMin != null && sunriseMin > s.start) {
       windowEnd = sunriseMin;
@@ -571,19 +555,6 @@ export function buildSalahWindows(times, sunrise, nextFajr, prayerStructure = DE
     }
     return { key: s.key, label: s.label, windowStart: s.start, windowEnd };
   });
-
-  if (prayerStructure !== "3") return windows;
-
-  // Combined mode: fold Asr's window into Dhuhr's and Isha's into Maghrib's.
-  // windowStart for each surviving key stays exactly what it already was
-  // (Dhuhr's own time, Maghrib's own time) — only windowEnd stretches to
-  // absorb the prayer that would otherwise have opened its own window.
-  const byKey = Object.fromEntries(windows.map((w) => [w.key, w]));
-  return [
-    byKey.fajr,
-    { key: "dhuhr", label: SALAH_LABEL_COMBINED.dhuhr, windowStart: byKey.dhuhr.windowStart, windowEnd: byKey.asr.windowEnd },
-    { key: "maghrib", label: SALAH_LABEL_COMBINED.maghrib, windowStart: byKey.maghrib.windowStart, windowEnd: byKey.isha.windowEnd },
-  ];
 }
 
 // Approximate windows traditionally treated as discouraged for prayer: just
