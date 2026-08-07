@@ -818,9 +818,9 @@ export default function SalahCalendar({ user, onLogout }) {
 
               {religion === "zoroastrianism" && (
                 <div className="sc-settings-row" style={S.settingsRow}>
-                  <div style={S.settingsLabel}>Noon Calculation</div>
+                  <div style={{ ...S.settingsLabel, width: 100 }}>Noon Calculation</div>
                   <select
-                    style={{ ...S.input, marginLeft: "auto", minWidth: 0 }}
+                    style={{ ...S.input, marginLeft: "auto", minWidth: 0, flexShrink: 1 }}
                     value={noonCalculation}
                     onChange={(e) => setNoonCalculation(e.target.value)}
                   >
