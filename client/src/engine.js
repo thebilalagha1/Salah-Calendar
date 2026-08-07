@@ -28,6 +28,16 @@ export const ZOROASTRIAN_LABEL = {
 // wildly off before a real solar fetch happens.
 export const DEFAULT_ZOROASTRIAN_TIMES = { havan: "06:00", rapithwin: "12:00", uzirin: "15:00", aiwisruthrem: "18:00", ushahin: "00:00" };
 export const DEFAULT_ZOROASTRIAN_DURATIONS = { havan: 20, rapithwin: 20, uzirin: 20, aiwisruthrem: 20, ushahin: 20 };
+// User-facing setting for how the Hāvan/Rapithwin boundary is determined:
+// "solar" uses the true solar noon returned by SunriseSunset.io (default,
+// astronomically correct but drifts a few minutes day to day); "clock" pins
+// it to a flat 12:00pm instead. Only affects that one boundary — sunrise and
+// sunset (and therefore every other Gāh boundary) are unaffected either way.
+export const NOON_CALCULATION_OPTIONS = [
+  { value: "solar", label: "Solar Noon" },
+  { value: "clock", label: "12:00 PM" },
+];
+export const DEFAULT_NOON_CALCULATION = "solar";
 
 // Order/label lookup by religion, for the handful of call sites that need to
 // render generically regardless of which one is active.
@@ -356,9 +366,12 @@ export const SunriseSunsetProvider = {
 // Modeling it as this date's own pre-dawn window sidesteps both problems.)
 // Clamped so an unusual timezone/latitude combination (solar noon falling
 // after 3pm local clock, etc.) can't produce a negative-length window.
-export function buildZoroastrianWindows(times) {
+// noonCalculation: "solar" (default) uses times.solarNoon as-is; "clock"
+// replaces it with a flat 12:00pm for the Hāvan/Rapithwin boundary only.
+export function buildZoroastrianWindows(times, noonCalculation = DEFAULT_NOON_CALCULATION) {
   const sunriseMin = toMin(times.sunrise);
-  const solarNoonMin = Math.max(toMin(times.solarNoon), sunriseMin);
+  const noonSourceMin = noonCalculation === "clock" ? 12 * 60 : toMin(times.solarNoon);
+  const solarNoonMin = Math.max(noonSourceMin, sunriseMin);
   const rapithwinEndMin = Math.max(15 * 60, solarNoonMin);
   const sunsetMin = Math.max(toMin(times.sunset), rapithwinEndMin);
 

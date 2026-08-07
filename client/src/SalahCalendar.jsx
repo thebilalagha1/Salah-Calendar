@@ -7,6 +7,7 @@ import {
   AladhanProvider, HebcalProvider, SunriseSunsetProvider, buildJudaismWindows, buildZoroastrianWindows, buildGenericWindows,
   JUDAISM_ORDER, JUDAISM_LABEL, DEFAULT_JUDAISM_TIMES, DEFAULT_JUDAISM_DURATIONS,
   ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, DEFAULT_ZOROASTRIAN_TIMES, DEFAULT_ZOROASTRIAN_DURATIONS,
+  NOON_CALCULATION_OPTIONS, DEFAULT_NOON_CALCULATION,
   ORDER_BY_RELIGION, LABEL_BY_RELIGION, KIND_LABEL_BY_RELIGION,
   EVENT_COLORS, DEFAULT_EVENT_COLOR, hexToRgba,
   SALAH_WINDOW_COLORS, PROHIBITED_COLOR,
@@ -139,6 +140,9 @@ export default function SalahCalendar({ user, onLogout }) {
   const [locationMode, setLocationMode] = useState("manual"); // manual | coords
   const [coords, setCoords] = useState(null); // { lat, lng }
   const [method, setMethod] = useState(DEFAULT_METHOD);
+  // Zoroastrianism only: whether the Hāvan/Rapithwin boundary uses true solar
+  // noon (live from SunriseSunset.io) or a flat 12:00pm clock time.
+  const [noonCalculation, setNoonCalculation] = useState(DEFAULT_NOON_CALCULATION);
   const [locStatus, setLocStatus] = useState("idle"); // idle | locating | ok | error
   const [fetchStatus, setFetchStatus] = useState("idle"); // idle | loading | ok | error
   const inFlightRef = useMemo(() => new Set(), []);
@@ -170,6 +174,7 @@ export default function SalahCalendar({ user, onLogout }) {
           if (s.locationMode) setLocationMode(s.locationMode);
           if (s.coords) setCoords(s.coords);
           if (typeof s.method === "number") setMethod(s.method);
+          if (["solar", "clock"].includes(s.noonCalculation)) setNoonCalculation(s.noonCalculation);
           if (["islam", "judaism", "zoroastrianism"].includes(s.religion)) setReligion(s.religion);
         }
       } catch {
@@ -186,9 +191,9 @@ export default function SalahCalendar({ user, onLogout }) {
 
   useEffect(() => {
     if (!storageLoaded) return;
-    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, religion }));
+    store.set("settings", JSON.stringify({ salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, noonCalculation, religion }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, religion, storageLoaded]);
+  }, [salahTimes, durations, sunrise, prayerOffsets, darkMode, use24h, locationMode, coords, method, noonCalculation, religion, storageLoaded]);
 
   // Browser's IANA zone — passed to Hebcal as tzid. In practice this matches
   // the location the user detected coordinates for, since both come from the
@@ -225,7 +230,7 @@ export default function SalahCalendar({ user, onLogout }) {
     }
     if (religion === "zoroastrianism") {
       const live = timesByDate[`zoroastrianism:${dateKey(date)}`];
-      if (live) return buildZoroastrianWindows(live);
+      if (live) return buildZoroastrianWindows(live, noonCalculation);
       return buildGenericWindows(ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, salahTimes);
     }
     const t = getTimesForDate(date);
@@ -807,6 +812,19 @@ export default function SalahCalendar({ user, onLogout }) {
                   <div style={S.settingsLabel}>Method</div>
                   <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
                     {CALC_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {religion === "zoroastrianism" && (
+                <div className="sc-settings-row" style={S.settingsRow}>
+                  <div style={S.settingsLabel}>Noon Calculation</div>
+                  <select
+                    style={{ ...S.input, marginLeft: "auto", minWidth: 0 }}
+                    value={noonCalculation}
+                    onChange={(e) => setNoonCalculation(e.target.value)}
+                  >
+                    {NOON_CALCULATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
               )}
