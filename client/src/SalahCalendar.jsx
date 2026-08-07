@@ -4,9 +4,10 @@ import {
   DEFAULT_TIMES, DEFAULT_DURATIONS, DEFAULT_SUNRISE, DEFAULT_METHOD, CALC_METHODS, uid, toMin, fmt12, fmt24, dateKey, sameDay,
   addDays, startOfWeek, startOfMonth, daysInMonth, WEEKDAYS, MONTHS,
   occursOnDate, instancesForDate, buildSalahWindows, buildProhibitedWindows, reflow,
-  AladhanProvider, HebcalProvider, SunriseSunsetProvider, buildJudaismWindows, buildZoroastrianWindows, buildGenericWindows,
+  AladhanProvider, HebcalProvider, SunriseSunsetProvider, buildJudaismWindows, buildZoroastrianWindows, buildGenericWindows, buildCatholicWindows,
   JUDAISM_ORDER, JUDAISM_LABEL, DEFAULT_JUDAISM_TIMES, DEFAULT_JUDAISM_DURATIONS,
   ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, DEFAULT_ZOROASTRIAN_TIMES, DEFAULT_ZOROASTRIAN_DURATIONS,
+  CATHOLIC_ORDER, CATHOLIC_LABEL, DEFAULT_CATHOLIC_TIMES, DEFAULT_CATHOLIC_DURATIONS,
   NOON_CALCULATION_OPTIONS, DEFAULT_NOON_CALCULATION,
   ORDER_BY_RELIGION, LABEL_BY_RELIGION, KIND_LABEL_BY_RELIGION,
   EVENT_COLORS, DEFAULT_EVENT_COLOR, hexToRgba,
@@ -58,7 +59,7 @@ const store = {
 const SEED_TASKS = [];
 
 // Live prayer-time provider name per religion, for status/hint text in Settings.
-const PROVIDER_NAME_BY_RELIGION = { islam: "AlAdhan", judaism: "Hebcal", zoroastrianism: "SunriseSunset.io" };
+const PROVIDER_NAME_BY_RELIGION = { islam: "AlAdhan", judaism: "Hebcal", zoroastrianism: "SunriseSunset.io", catholic: "SunriseSunset.io" };
 
 // ---------- icons (Tabler-style outline, hand-drawn minimal) ----------
 const Icon = {
@@ -88,14 +89,14 @@ const Icon = {
 export default function SalahCalendar({ user, onLogout }) {
   const [view, setView] = useState("ring"); // ring | day | week | month | year
   const [cursor, setCursor] = useState(new Date());
-  // religion: "islam" | "judaism" | "zoroastrianism" | null (null = not chosen yet, show the picker)
+  // religion: "islam" | "judaism" | "zoroastrianism" | "catholic" | null (null = not chosen yet, show the picker)
   const [religion, setReligion] = useState(null);
   // Manual fallback templates hold ALL religions' keys at once (fajr..isha,
-  // shacharit/mincha/maariv, havan..ushahin) — one settings blob, no
-  // per-religion storage key, switching religions later just reads a
-  // different subset of keys.
-  const [salahTimes, setSalahTimes] = useState({ ...DEFAULT_TIMES, ...DEFAULT_JUDAISM_TIMES, ...DEFAULT_ZOROASTRIAN_TIMES });
-  const [durations, setDurations] = useState({ ...DEFAULT_DURATIONS, ...DEFAULT_JUDAISM_DURATIONS, ...DEFAULT_ZOROASTRIAN_DURATIONS });
+  // shacharit/mincha/maariv, havan..ushahin, officeOfReadings..nightPrayer) —
+  // one settings blob, no per-religion storage key, switching religions
+  // later just reads a different subset of keys.
+  const [salahTimes, setSalahTimes] = useState({ ...DEFAULT_TIMES, ...DEFAULT_JUDAISM_TIMES, ...DEFAULT_ZOROASTRIAN_TIMES, ...DEFAULT_CATHOLIC_TIMES });
+  const [durations, setDurations] = useState({ ...DEFAULT_DURATIONS, ...DEFAULT_JUDAISM_DURATIONS, ...DEFAULT_ZOROASTRIAN_DURATIONS, ...DEFAULT_CATHOLIC_DURATIONS });
   const [sunrise, setSunrise] = useState(DEFAULT_SUNRISE); // manual fallback, used for Fajr's window end + shading
   // Where WITHIN its window the person actually prays, per prayer key, as
   // minutes after the window opens (0 = right at window start, the old
@@ -175,7 +176,7 @@ export default function SalahCalendar({ user, onLogout }) {
           if (s.coords) setCoords(s.coords);
           if (typeof s.method === "number") setMethod(s.method);
           if (["solar", "clock"].includes(s.noonCalculation)) setNoonCalculation(s.noonCalculation);
-          if (["islam", "judaism", "zoroastrianism"].includes(s.religion)) setReligion(s.religion);
+          if (["islam", "judaism", "zoroastrianism", "catholic"].includes(s.religion)) setReligion(s.religion);
         }
       } catch {
         // no saved settings yet — keep the defaults
@@ -232,6 +233,10 @@ export default function SalahCalendar({ user, onLogout }) {
       const live = timesByDate[`zoroastrianism:${dateKey(date)}`];
       if (live) return buildZoroastrianWindows(live, noonCalculation);
       return buildGenericWindows(ZOROASTRIAN_ORDER, ZOROASTRIAN_LABEL, salahTimes);
+    }
+    if (religion === "catholic") {
+      const live = timesByDate[`catholic:${dateKey(date)}`];
+      return buildCatholicWindows(salahTimes, live?.sunrise, live?.sunset);
     }
     const t = getTimesForDate(date);
     const nextFajr = getTimesForDate(addDays(date, 1)).fajr;
@@ -325,6 +330,29 @@ export default function SalahCalendar({ user, onLogout }) {
     }
   }, [locationMode, coords, tzid]);
 
+  // Catholic Liturgy of the Hours only needs sunrise/sunset (to anchor
+  // Morning/Evening Prayer — see buildCatholicWindows), so this reuses the
+  // same SunriseSunsetProvider Zoroastrianism uses, just cached under its
+  // own "catholic:" prefix since the other three Hours stay manual either way.
+  const fetchCatholicDate = useCallback(async (date) => {
+    const key = `catholic:${dateKey(date)}`;
+    if (locationMode === "manual" || !coords || inFlightRef.has(key)) return;
+    inFlightRef.add(key);
+    try {
+      const mapped = await SunriseSunsetProvider.fetchDate(coords.lat, coords.lng, date, tzid);
+      if (mapped) {
+        setTimesByDate((prev) => ({ ...prev, [key]: mapped }));
+        setFetchStatus("ok");
+      } else {
+        setFetchStatus("error");
+      }
+    } catch {
+      setFetchStatus("error");
+    } finally {
+      inFlightRef.delete(key);
+    }
+  }, [locationMode, coords, tzid]);
+
   // Auto-fetch prayer times for whichever dates are currently visible (day/week/ring views).
   useEffect(() => {
     if (locationMode === "manual") return;
@@ -340,6 +368,8 @@ export default function SalahCalendar({ user, onLogout }) {
       fetchJudaismRange(missing); // one batch call for the whole visible range
     } else if (religion === "zoroastrianism") {
       missing.forEach((d) => fetchZoroastrianDate(d));
+    } else if (religion === "catholic") {
+      missing.forEach((d) => fetchCatholicDate(d));
     } else {
       missing.forEach((d) => fetchIslamDate(d));
     }
@@ -794,6 +824,9 @@ export default function SalahCalendar({ user, onLogout }) {
               <button className="sc-btn" style={{ ...S.segBtn, ...(religion === "zoroastrianism" ? S.segBtnActive : {}) }} onClick={() => setReligion("zoroastrianism")}>
                 Zoroastrianism
               </button>
+              <button className="sc-btn" style={{ ...S.segBtn, ...(religion === "catholic" ? S.segBtnActive : {}) }} onClick={() => setReligion("catholic")}>
+                Catholicism
+              </button>
             </div>
 
             <div style={S.sectionLabel}>Prayer time source</div>
@@ -848,6 +881,13 @@ export default function SalahCalendar({ user, onLogout }) {
                   <a href="https://sunrisesunset.io" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>SunriseSunset.io</a>.
                 </div>
               )}
+              {religion === "catholic" && (
+                <div style={S.hint}>
+                  Morning and Evening Prayer are anchored to sunrise/sunset, powered by{" "}
+                  <a href="https://sunrisesunset.io" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>SunriseSunset.io</a>.
+                  Office of Readings, Daytime Prayer, and Night Prayer have no live source and are always set manually below.
+                </div>
+              )}
             </div>
 
             <div style={S.sectionLabel}>Manual times {locationMode !== "manual" ? "(fallback)" : ""} and window length</div>
@@ -889,6 +929,10 @@ export default function SalahCalendar({ user, onLogout }) {
                 ? (locationMode !== "manual"
                     ? "Hāvan through Ushahin are computed from SunriseSunset.io's sunrise, solar noon, and sunset automatically; the times above are only used as a fallback."
                     : "Each window runs until the next one starts, so these times only set where each Gāh begins.")
+                : religion === "catholic"
+                ? (locationMode !== "manual"
+                    ? "Morning and Evening Prayer are pulled from SunriseSunset.io automatically (the times above are only used as a fallback); Office of Readings, Daytime Prayer, and Night Prayer always use the times above."
+                    : "Each window runs until the next one starts, so these times only set where each Hour begins.")
                 : (locationMode !== "manual"
                     ? "Sunrise is pulled from AlAdhan automatically; the time above is only used as a fallback."
                     : "Used to shade the Fajr prayer window on the calendar and mark the post-sunrise discouraged time.")}
@@ -945,6 +989,10 @@ function ReligionPicker({ darkMode, onPick }) {
         <button className="sc-btn" style={styles_rp.optionBtn} onClick={() => onPick("zoroastrianism")}>
           <div style={styles_rp.optionTitle}>Zoroastrianism</div>
           <div style={styles_rp.optionDesc}>Hāvan, Rapithwin, Uzīrin, Aiwisrūthrəm, Ushahin — via SunriseSunset.io</div>
+        </button>
+        <button className="sc-btn" style={styles_rp.optionBtn} onClick={() => onPick("catholic")}>
+          <div style={styles_rp.optionTitle}>Catholicism</div>
+          <div style={styles_rp.optionDesc}>Office of Readings, Morning, Daytime, Evening, Night Prayer — Liturgy of the Hours</div>
         </button>
       </div>
     </div>

@@ -39,13 +39,37 @@ export const NOON_CALCULATION_OPTIONS = [
 ];
 export const DEFAULT_NOON_CALCULATION = "solar";
 
+// ---------- Catholicism (Liturgy of the Hours — 5-hour lay form) ----------
+// This is the simplified schedule actually prayed by most lay Catholics
+// (as opposed to the full 7-hour monastic Divine Office), matching what
+// apps like iBreviary/Universalis present: Office of Readings, Morning
+// Prayer (Lauds), Daytime Prayer (Terce/Sext/None collapsed to one), Evening
+// Prayer (Vespers), Night Prayer (Compline).
+export const CATHOLIC_ORDER = ["officeOfReadings", "morningPrayer", "daytimePrayer", "eveningPrayer", "nightPrayer"];
+export const CATHOLIC_LABEL = {
+  officeOfReadings: "Office of Readings",
+  morningPrayer: "Morning Prayer",
+  daytimePrayer: "Daytime Prayer",
+  eveningPrayer: "Evening Prayer",
+  nightPrayer: "Night Prayer",
+};
+// Manual-fallback placeholders. Traditionally Morning Prayer is prayed at
+// dawn and Evening Prayer at dusk, so those two get overridden with live
+// sunrise/sunset when a location is available (see buildCatholicWindows) —
+// these values are just their pre-location fallback. Office of Readings,
+// Daytime Prayer, and Night Prayer have no live/astronomical source at all
+// (there's no equivalent of a solar or halachic rule for them), so they're
+// always manual, user-adjustable clock times, location or not.
+export const DEFAULT_CATHOLIC_TIMES = { officeOfReadings: "06:00", morningPrayer: "07:00", daytimePrayer: "12:00", eveningPrayer: "18:00", nightPrayer: "21:00" };
+export const DEFAULT_CATHOLIC_DURATIONS = { officeOfReadings: 15, morningPrayer: 15, daytimePrayer: 10, eveningPrayer: 15, nightPrayer: 10 };
+
 // Order/label lookup by religion, for the handful of call sites that need to
 // render generically regardless of which one is active.
-export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER, zoroastrianism: ZOROASTRIAN_ORDER };
-export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL, zoroastrianism: ZOROASTRIAN_LABEL };
+export const ORDER_BY_RELIGION = { islam: SALAH_ORDER, judaism: JUDAISM_ORDER, zoroastrianism: ZOROASTRIAN_ORDER, catholic: CATHOLIC_ORDER };
+export const LABEL_BY_RELIGION = { islam: SALAH_LABEL, judaism: JUDAISM_LABEL, zoroastrianism: ZOROASTRIAN_LABEL, catholic: CATHOLIC_LABEL };
 // What to call a single prayer/observance period in this tradition — used
 // anywhere the UI needs a generic noun instead of "Salah"/"Tefillah" baked in.
-export const KIND_LABEL_BY_RELIGION = { islam: "Salah", judaism: "Tefillah", zoroastrianism: "Gāh" };
+export const KIND_LABEL_BY_RELIGION = { islam: "Salah", judaism: "Tefillah", zoroastrianism: "Gāh", catholic: "Hour" };
 
 export const DAY_START = 0;
 export const DAY_END = 24 * 60;
@@ -125,6 +149,13 @@ export const SALAH_WINDOW_COLORS = {
   uzirin: "#EF6C00",       // deep orange — 3pm to sunset
   aiwisruthrem: "#6A1B9A", // dusk violet — sunset to midnight
   ushahin: "#1A237E",      // deep night indigo — midnight to sunrise
+  // Catholicism's five Hours, keyed separately for the same reason as the
+  // others above.
+  officeOfReadings: "#4E342E", // pre-dawn brown
+  morningPrayer: "#FFB300",    // dawn gold — Lauds
+  daytimePrayer: "#43A047",    // midday green
+  eveningPrayer: "#8E24AA",    // dusk violet — Vespers
+  nightPrayer: "#1A237E",      // deep night indigo — Compline
 };
 // Traditionally-discouraged prayer windows get their own warm warning tone,
 // distinct from every salah color above, so they never read as "just another salah".
@@ -413,6 +444,22 @@ export function buildGenericWindows(order, label, times) {
     const next = sorted[i + 1];
     return { key: s.key, label: s.label, windowStart: s.start, windowEnd: next ? next.start : DAY_END };
   });
+}
+
+// Morning Prayer (Lauds) and Evening Prayer (Vespers) are traditionally
+// prayed at dawn and dusk respectively, so when live sunrise/sunset is
+// available (sunrise/sunset here are "HH:MM" strings from
+// SunriseSunsetProvider) those two keys are overridden with it before
+// handing off to buildGenericWindows. Office of Readings, Daytime Prayer,
+// and Night Prayer have no live source and always come from `times`
+// (the manual/default template) directly — pass null/undefined for
+// sunrise/sunset to get the fully-manual fallback used before a location
+// has been detected, same role DEFAULT_ZOROASTRIAN_TIMES plays.
+export function buildCatholicWindows(times, sunrise, sunset) {
+  const merged = { ...times };
+  if (sunrise) merged.morningPrayer = sunrise;
+  if (sunset) merged.eveningPrayer = sunset;
+  return buildGenericWindows(CATHOLIC_ORDER, CATHOLIC_LABEL, merged);
 }
 
 export function toMin(hhmm) {
