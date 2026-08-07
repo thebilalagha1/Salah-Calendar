@@ -176,6 +176,7 @@ export function hexToRgba(hex, alpha) {
 // ---------- AlAdhan API helpers ----------
 export const DEFAULT_METHOD = 2;
 export const CALC_METHODS = [
+  { value: 0, label: "Shia Ithna-Ashari, Leva Institute, Qum" },
   { value: 1, label: "University of Islamic Sciences, Karachi" },
   { value: 2, label: "Islamic Society of North America (ISNA)" },
   { value: 3, label: "Muslim World League" },

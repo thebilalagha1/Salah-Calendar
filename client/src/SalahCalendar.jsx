@@ -144,6 +144,12 @@ export default function SalahCalendar({ user, onLogout }) {
   const [locationMode, setLocationMode] = useState("manual"); // manual | coords
   const [coords, setCoords] = useState(null); // { lat, lng }
   const [method, setMethod] = useState(DEFAULT_METHOD);
+  // Remembers the last non-Ja'fari method so switching the prayer structure
+  // back to "5" can restore it, instead of always dropping to DEFAULT_METHOD.
+  const prevMethodRef = useRef(DEFAULT_METHOD);
+  useEffect(() => {
+    if (method !== 0) prevMethodRef.current = method;
+  }, [method]);
   // Zoroastrianism only: whether the Hāvan/Rapithwin boundary uses true solar
   // noon (live from SunriseSunset.io) or a flat 12:00pm clock time.
   const [noonCalculation, setNoonCalculation] = useState(DEFAULT_NOON_CALCULATION);
@@ -815,7 +821,19 @@ export default function SalahCalendar({ user, onLogout }) {
               {religion === "islam" && (
                 <div className="sc-settings-row" style={S.settingsRow}>
                   <div style={S.settingsLabel}>Method</div>
-                  <select style={{ ...S.input, marginLeft: "auto", minWidth: 0 }} value={method} onChange={(e) => { setMethod(Number(e.target.value)); setTimesByDate({}); }}>
+                  <select
+                    style={{ ...S.input, marginLeft: "auto", minWidth: 0 }}
+                    value={method}
+                    onChange={(e) => {
+                      const m = Number(e.target.value);
+                      setMethod(m);
+                      setTimesByDate({});
+                      // Linked with Prayer Structure: Ja'fari calculation
+                      // implies the combined 3-prayer structure, and picking
+                      // any other method implies the standard 5.
+                      setPrayerStructure(m === 0 ? "3" : "5");
+                    }}
+                  >
                     {CALC_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
@@ -827,7 +845,15 @@ export default function SalahCalendar({ user, onLogout }) {
                   <select
                     style={{ ...S.input, marginLeft: "auto", minWidth: 0, flexShrink: 1 }}
                     value={prayerStructure}
-                    onChange={(e) => setPrayerStructure(e.target.value)}
+                    onChange={(e) => {
+                      const ps = e.target.value;
+                      setPrayerStructure(ps);
+                      // Linked with Method: combined structure implies
+                      // Ja'fari calculation; switching back to 5 restores
+                      // whichever non-Ja'fari method was active before.
+                      setMethod(ps === "3" ? 0 : prevMethodRef.current);
+                      setTimesByDate({});
+                    }}
                   >
                     {PRAYER_STRUCTURE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
@@ -835,7 +861,7 @@ export default function SalahCalendar({ user, onLogout }) {
               )}
               {religion === "islam" && prayerStructure === "3" && (
                 <div style={S.hint}>
-                  Combines Dhuhr with Asr and Maghrib with Isha — the standard practice in Ja'fari (Shia) jurisprudence, and permitted in Sunni schools under travel or necessity.
+                  Combines Dhuhr with Asr and Maghrib with Isha — the standard practice in Ja'fari (Shia) jurisprudence, and permitted in Sunni schools under travel or necessity. Linked to the Ja'fari calculation method above.
                 </div>
               )}
 
