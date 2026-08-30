@@ -18,6 +18,7 @@ import {
 import { API_BASE_URL } from "./config.js";
 import { authHeaders } from "./authToken.js";
 import syncrosanctWordmark from "./assets/syncrosanct-wordmark.png";
+import syncrosanctWordmarkBlack from "./assets/syncrosanct-wordmark-black.png";
 import syncrosanctIcon from "./assets/syncrosanct-icon.png";
 
 const PX_PER_MIN = 1.1;
@@ -615,7 +616,7 @@ export default function SalahCalendar({ user, onLogout }) {
       >
         <div style={S.sidebarInner}>
           <div style={S.brand}>
-            <img src={syncrosanctWordmark} alt="Syncrosanct" style={S.brandLockup} />
+            <img src={darkMode ? syncrosanctWordmark : syncrosanctWordmarkBlack} alt="Syncrosanct" style={S.brandLockup} />
             <button
               className="sc-btn sc-icon-btn sc-close-btn"
               style={{ ...S.iconOnlyBtn, marginLeft: "auto", flexShrink: 0 }}
