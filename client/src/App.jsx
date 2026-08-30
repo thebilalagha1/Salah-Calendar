@@ -3,7 +3,7 @@ import { GoogleLogin } from "@react-oauth/google";
 import { API_BASE_URL } from "./config.js";
 import { getToken, setToken, clearToken, authHeaders } from "./authToken.js";
 import SalahCalendar from "./SalahCalendar.jsx";
-import qamuWordmark from "./assets/qamu-wordmark.png";
+import syncrosanctWordmark from "./assets/syncrosanct-wordmark.png";
 
 export default function App() {
   const [status, setStatus] = useState("checking"); // checking | signedOut | signedIn
@@ -82,7 +82,7 @@ export default function App() {
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         `}</style>
         <div style={styles.card}>
-          <img src={qamuWordmark} alt="QAMU" style={styles.wordmark} />
+          <img src={syncrosanctWordmark} alt="Syncrosanct" style={styles.wordmark} />
           <div style={styles.subtitle}>Sign in to sync your prayer times and events across devices.</div>
           <div style={styles.loginBtnWrap}>
             <GoogleLogin

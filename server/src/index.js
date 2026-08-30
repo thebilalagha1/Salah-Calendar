@@ -90,5 +90,5 @@ app.put("/api/kv/:key", requireAuth, (req, res) => {
 
 const port = process.env.PORT || 8787;
 app.listen(port, () => {
-  console.log(`Salah calendar API listening on http://localhost:${port}`);
+  console.log(`Syncrosanct API listening on http://localhost:${port}`);
 });

@@ -17,8 +17,8 @@ import {
 
 import { API_BASE_URL } from "./config.js";
 import { authHeaders } from "./authToken.js";
-import qamuWordmark from "./assets/qamu-wordmark.png";
-import qamuIcon from "./assets/qamu-icon.png";
+import syncrosanctWordmark from "./assets/syncrosanct-wordmark.png";
+import syncrosanctIcon from "./assets/syncrosanct-icon.png";
 
 const PX_PER_MIN = 1.1;
 
@@ -615,7 +615,7 @@ export default function SalahCalendar({ user, onLogout }) {
       >
         <div style={S.sidebarInner}>
           <div style={S.brand}>
-            <img src={qamuWordmark} alt="QAMU" style={S.brandLockup} />
+            <img src={syncrosanctWordmark} alt="Syncrosanct" style={S.brandLockup} />
             <button
               className="sc-btn sc-icon-btn sc-close-btn"
               style={{ ...S.iconOnlyBtn, marginLeft: "auto", flexShrink: 0 }}
@@ -688,7 +688,7 @@ export default function SalahCalendar({ user, onLogout }) {
             >
               <Icon.Menu width={16} height={16} />
             </button>
-            {!sidebarOpen && <img src={qamuIcon} alt="" style={S.topbarMark} />}
+            {!sidebarOpen && <img src={syncrosanctIcon} alt="" style={S.topbarMark} />}
             <button className="sc-btn sc-icon-btn sc-chev-left" style={S.iconOnlyBtn} onClick={() => nav(-1)} aria-label="Previous"><Icon.ChevL width={16} height={16} /></button>
             <button className="sc-btn sc-icon-btn sc-chev-right" style={S.iconOnlyBtn} onClick={() => nav(1)} aria-label="Next"><Icon.ChevR width={16} height={16} /></button>
             <div style={S.periodLabel}>

@@ -2,7 +2,7 @@
 // session survives cross-site API calls in every browser (the client on
 // vercel.app calling the server on onrender.com is a cross-site request;
 // cookies aren't reliable there, but an explicit header always is).
-const KEY = "qamu_auth_token";
+const KEY = "syncrosanct_auth_token";
 
 export function getToken() {
   try {

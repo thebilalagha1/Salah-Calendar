@@ -1,4 +1,4 @@
-# Salah Calendar — Google Sign-In + Cloud Sync
+# Syncrosanct — Google Sign-In + Cloud Sync
 
 Two pieces:
 
